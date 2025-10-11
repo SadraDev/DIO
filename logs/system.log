@@ -1,0 +1,4 @@
+2025-10-11 18:50:40,227 | system | INFO | initialize:47 | Logging system initialized successfully
+2025-10-11 18:50:47,218 | system | INFO | log_system_event:236 | SYSTEM_EVENT | event_type=backtest_started | symbols=['GBPUSD.', 'EURUSD.'] | start_date=2025-10-01T00:00:00 | end_date=2025-10-09T00:00:00 | initial_balance=10000
+2025-10-11 18:50:58,634 | system | INFO | log_system_event:236 | SYSTEM_EVENT | event_type=prop_evaluation | status=passed | reason=total_profit_target | win_percent=33.48342244753312
+2025-10-11 18:50:58,634 | system | INFO | log_system_event:236 | SYSTEM_EVENT | event_type=backtest_completed | symbols=['GBPUSD.', 'EURUSD.'] | total_signals=14 | overall_profit=5033.846250000178

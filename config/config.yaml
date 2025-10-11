@@ -1,0 +1,135 @@
+# System Configuration
+system:
+  name: "Two Hunters Trading System"
+  version: "2.0.0"
+
+# Paths Configuration  
+paths:
+  logs: "logs"
+  data: "data"
+  outputs: "outputs"
+  strategies: "src/strategies"
+
+# Account Settings
+account:
+  initial_balance: 10000
+  default_risk_percent: 0.01
+  prop_trading:
+    daily_fail_percent: 0.05
+    total_fail_percent: 0.08
+    win_target_percent: 0.15
+
+# Trading Configuration
+trading:
+  symbols: ["EURUSD.", "GBPUSD."]
+  max_signals_per_symbol: 2
+  risk:
+    max_risk_percent: 0.05
+    recovery_enabled: true
+    modifiers:
+      trend_cut: 2.0
+      time_cut: 2.0
+      choch_cut: 2.0
+      recovery_cut: 2.0
+
+# Market Parameters
+market:
+  standard_pip_size: 0.0001
+  standard_lot_size: 100000
+  min_lot_size: 0.01
+
+# MT5 Configuration
+mt5:
+  magic_number: 234000
+  deviation: 10
+  connection_timeout: 30
+  reconnect_attempts: 3
+  reconnect_delay: 5
+
+# Data Settings
+data:
+  timeframe: "M1"
+  mode: "mid"
+  max_bars_memory: 1000
+
+# Strategy Configurations
+strategies:
+  two_hunters:
+    margin_pips: 0.05
+    fvg:
+      min_size_pips: 1.0
+      max_size_pips: 3.0
+    ratios:
+      stop_loss: 1.0
+      take_profit: 3.0
+    breakout:
+      num_hunt_main: 2
+      num_hunt_recovery: 1
+    mbox_time:
+      start: "01:00"
+      end: "09:00"
+    session_time:
+      start: "09:01"
+      end: "13:00"
+    choch:
+      window: 15
+      tolerance: 5
+      buffer: 0.0000001
+      intensity: 3.0
+      use_volume: false
+      single_hit: true
+      volume_factor: 1.2
+    flags:
+      use_trading_hours: false
+      use_all_flags: false
+      use_trend_flag: false
+      use_time_flag: false
+      use_choch_flag: false
+
+# Backtesting Settings
+backtesting:
+  default_start: "2024-08-01"
+  default_end: "2024-08-31"
+  save_results: true
+  output_format: "csv"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  log_to_file: true
+  log_to_console: true
+  max_file_size_mb: 50
+  backup_count: 5
+  format:
+    detailed: "%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s"
+    simple: "%(asctime)s | %(levelname)s | %(message)s"
+  files:
+    main: "main.log"
+    trading: "trading.log"
+    backtest: "backtest.log"
+    connection: "connection.log"
+    system: "system.log"
+    orders: "orders.log"
+    signals: "signals.log"
+
+plotting:
+  default_chart_type: "interactive"  # or "static"
+  report_directory: "reports"
+  auto_open_browser: false
+  save_static_backup: true
+
+live_trading:
+  work_interval: 1
+  max_concurrent_symbols: 5
+  enable_monitoring: true
+  monitoring_port: 8765
+  emergency_stop_loss_percent: 0.10
+  system_hours:
+    start: "09:30"
+    end: "13:30"
+
+monitoring:
+  websocket_host: "localhost"
+  websocket_port: 8765
+  update_interval: 5
+  enable_alerts: true
