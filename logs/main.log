@@ -1,8 +1,0 @@
-2025-10-11 18:51:07,159 | main | INFO | plot_candlestick_interactive:164 | Interactive chart saved: reports\interactive\GBPUSD._interactive_20251011_185104.html
-2025-10-11 18:51:08,083 | main | INFO | plot_candlestick_interactive:164 | Interactive chart saved: reports\interactive\EURUSD._interactive_20251011_185108.html
-2025-10-11 18:51:08,518 | main | INFO | plot_candlestick_interactive:164 | Interactive chart saved: reports\full_report_20251011_185108\GBPUSD._chart.html
-2025-10-11 18:51:08,757 | main | INFO | plot_candlestick_interactive:164 | Interactive chart saved: reports\full_report_20251011_185108\EURUSD._chart.html
-2025-10-11 18:51:08,902 | main | INFO | create_performance_report:277 | Performance report saved: reports\full_report_20251011_185108\GBPUSD._performance.html
-2025-10-11 18:51:08,946 | main | INFO | create_performance_report:277 | Performance report saved: reports\full_report_20251011_185108\EURUSD._performance.html
-2025-10-11 18:51:09,149 | main | INFO | create_symbol_comparison_report:971 | Simplified symbol comparison report saved: reports\full_report_20251011_185108\symbol_comparison.html
-2025-10-11 18:51:09,150 | main | INFO | generate_full_trading_report:76 | Full trading report generated: reports\full_report_20251011_185108\index.html

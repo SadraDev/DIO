@@ -44,14 +44,10 @@ class TradingPlotter:
         self.report_dir = Path(report_dir)
         self.report_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create subdirectories
-        (self.report_dir / "interactive").mkdir(exist_ok=True)
-        (self.report_dir / "static").mkdir(exist_ok=True)
-        
         self.logger = TradingLogger.get_main_logger()
         
         # Load configuration
-        self.mbox_hours = settings.get('trading.mbox_hours', {'start': '01:00', 'end': '08:59'})
+        self.mbox_hours = settings.get('strategies.two_hunters.mbox_time')
         
         # Color schemes - updated with blue MBox
         self.colors = {
@@ -151,17 +147,10 @@ class TradingPlotter:
         if savepath is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{symbol}_interactive_{timestamp}.html"
-            savepath = self.report_dir / "interactive" / filename
+            savepath = self.report_dir / filename
         else:
             savepath = Path(savepath)
-            
-        # Generate clean HTML
-        html_content = self._generate_clean_html(fig, chart_title, symbol, bars, signals)
-        
-        with open(savepath, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        
-        self.logger.info(f"Interactive chart saved: {savepath}")
+
         return str(savepath)
     
     def plot_ohlc(
@@ -663,44 +652,6 @@ class TradingPlotter:
             <div class="chart-container" id="chart">
                 {plot_div}
             </div>
-            
-            <div class="legend">
-                <h3>Chart Legend</h3>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: #00ff88;"></span>
-                    Bullish Candles
-                </div>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: #ff4444;"></span>
-                    Bearish Candles
-                </div>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: rgba(52, 152, 219, 0.3);"></span>
-                    MBox Hours (Blue)
-                </div>
-                <br><br>
-                <h4>Signal Visualization:</h4>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: rgba(255, 68, 68, 0.2); border: 1px dotted red;"></span>
-                    Initial SL Zone
-                </div>
-                <div class="legend-item">
-                    <span class="legend-color" style="background: rgba(0, 255, 136, 0.2); border: 1px dotted green;"></span>
-                    Initial TP Zone
-                </div>
-                <div class="legend-item">
-                    <span class="legend-line" style="background: blue;"></span>
-                    Current Entry
-                </div>
-                <div class="legend-item">
-                    <span class="legend-line" style="background: red;"></span>
-                    Current SL
-                </div>
-                <div class="legend-item">
-                    <span class="legend-line" style="background: green;"></span>
-                    Current TP
-                </div>
-            </div>
         </div>
         
         <script>
@@ -746,7 +697,7 @@ class TradingPlotter:
         budget = Budget()
         for i, signal in enumerate(signals, 1):
             outcome = signal.outcome.value.upper() if hasattr(signal, 'outcome') and signal.outcome else 'N/A'
-            gain = f"${round(signal.gain)}" if getattr(signal, 'gain', None) not in (None, 0.0) else ("$0.0" if getattr(signal, 'gain', None) == 0.0 else 'N/A')
+            gain = f"{round(signal.gain)}" if getattr(signal, 'gain', None) not in (None, 0.0) else ("0.0" if getattr(signal, 'gain', None) == 0.0 else 'N/A')
             lot_size = f"{signal.entry_lot:.2f}" if hasattr(signal, 'entry_lot') and signal.entry_lot else 'N/A'
             
             if outcome == "WIN":
@@ -762,7 +713,7 @@ class TradingPlotter:
             budget.apply_signal_gain(signal)
             current_balance = round(budget.current_balance)
 
-            outcome_class = "win" if outcome == "WIN" else "loss" if outcome == "LOSS" else "neutral"
+            outcome_class = "win" if signal.gain >= 0 else "loss" if signal.gain < 0 else "neutral"
             
             table_rows += f"""
                 <tr>
@@ -772,10 +723,10 @@ class TradingPlotter:
                     <td>{entry_price}</td>
                     <td>{stop_loss}</td>
                     <td>{take_profit}</td>
-                    <td class="{outcome_class}">{outcome}</td>
+                    <td class="{outcome_class}">{outcome_class.upper()}</td>
                     <td>{lot_size}</td>
                     <td>{pip_size}</td>
-                    <td class="{outcome_class}">{gain}</td>
+                    <td class="{outcome_class}">${gain}</td>
                     <td><b>${current_balance}</b></td>
                 </tr>
             """

@@ -1,0 +1,204 @@
+2025-10-12 06:18:01,423 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-01 00:00:00 to 2025-10-01 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:01,433 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:01,710 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for GBPUSD. from ticks
+2025-10-12 06:18:01,710 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:01,714 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-01 13:15:00 to 2025-10-02 13:15:00 (TF: 1, Mode: min)
+2025-10-12 06:18:01,730 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:01,976 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for GBPUSD. from ticks
+2025-10-12 06:18:01,976 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:01,981 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-01 15:11:00 to 2025-10-02 15:11:00 (TF: 1, Mode: min)
+2025-10-12 06:18:01,989 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:02,233 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for GBPUSD. from ticks
+2025-10-12 06:18:02,233 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:02,235 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-01 00:00:00 to 2025-10-01 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:02,244 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:02,458 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:02,458 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:02,461 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-01 13:35:00 to 2025-10-02 13:35:00 (TF: 1, Mode: min)
+2025-10-12 06:18:02,468 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:02,674 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:02,675 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:02,679 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-01 13:46:00 to 2025-10-02 13:46:00 (TF: 1, Mode: min)
+2025-10-12 06:18:02,686 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:02,898 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:02,899 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:02,900 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-02 00:00:00 to 2025-10-02 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:02,907 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:03,098 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for GBPUSD. from ticks
+2025-10-12 06:18:03,098 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:03,101 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-02 13:39:00 to 2025-10-03 13:39:00 (TF: 1, Mode: min)
+2025-10-12 06:18:03,108 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:03,302 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for GBPUSD. from ticks
+2025-10-12 06:18:03,302 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:03,305 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-02 14:20:00 to 2025-10-03 14:20:00 (TF: 1, Mode: min)
+2025-10-12 06:18:03,311 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:03,505 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for GBPUSD. from ticks
+2025-10-12 06:18:03,505 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:03,506 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-02 00:00:00 to 2025-10-02 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:03,514 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:03,674 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:03,674 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:03,678 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-02 12:38:00 to 2025-10-03 12:38:00 (TF: 1, Mode: min)
+2025-10-12 06:18:03,685 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:03,831 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:03,831 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:03,835 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-02 13:39:00 to 2025-10-03 13:39:00 (TF: 1, Mode: min)
+2025-10-12 06:18:03,841 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:03,987 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:03,987 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:03,988 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-03 00:00:00 to 2025-10-03 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:03,995 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,187 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for GBPUSD. from ticks
+2025-10-12 06:18:04,187 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,190 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-03 14:38:00 to 2025-10-04 14:38:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,197 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,334 | connection | INFO | fetch_bars_from_mt5:176 | Created 771 min bars for GBPUSD. from ticks
+2025-10-12 06:18:04,334 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,336 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-03 00:00:00 to 2025-10-03 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,343 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,474 | connection | INFO | fetch_bars_from_mt5:176 | Created 1427 min bars for EURUSD. from ticks
+2025-10-12 06:18:04,474 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,476 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-03 14:14:00 to 2025-10-04 14:14:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,483 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,574 | connection | INFO | fetch_bars_from_mt5:176 | Created 795 min bars for EURUSD. from ticks
+2025-10-12 06:18:04,574 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,577 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-03 14:38:00 to 2025-10-04 14:38:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,585 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,670 | connection | INFO | fetch_bars_from_mt5:176 | Created 771 min bars for EURUSD. from ticks
+2025-10-12 06:18:04,671 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,672 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-04 00:00:00 to 2025-10-04 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,678 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,706 | connection | INFO | fetch_bars_from_mt5:176 | Created 209 min bars for GBPUSD. from ticks
+2025-10-12 06:18:04,706 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,707 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-04 00:00:00 to 2025-10-04 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,713 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,730 | connection | INFO | fetch_bars_from_mt5:176 | Created 209 min bars for EURUSD. from ticks
+2025-10-12 06:18:04,730 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,731 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-05 00:00:00 to 2025-10-05 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,737 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,737 | connection | WARNING | fetch_bars_from_mt5:77 | No tick data available for GBPUSD. in range.
+2025-10-12 06:18:04,738 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,738 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-05 00:00:00 to 2025-10-05 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,744 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,744 | connection | WARNING | fetch_bars_from_mt5:77 | No tick data available for EURUSD. in range.
+2025-10-12 06:18:04,744 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,744 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-06 00:00:00 to 2025-10-06 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,751 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:04,968 | connection | INFO | fetch_bars_from_mt5:176 | Created 1219 min bars for GBPUSD. from ticks
+2025-10-12 06:18:04,968 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:04,970 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-06 00:00:00 to 2025-10-06 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:04,977 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:05,144 | connection | INFO | fetch_bars_from_mt5:176 | Created 1219 min bars for EURUSD. from ticks
+2025-10-12 06:18:05,144 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:05,147 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-06 13:24:00 to 2025-10-07 13:24:00 (TF: 1, Mode: min)
+2025-10-12 06:18:05,154 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:05,316 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:05,316 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:05,318 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-07 00:00:00 to 2025-10-07 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:05,325 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:05,522 | connection | INFO | fetch_bars_from_mt5:176 | Created 1427 min bars for GBPUSD. from ticks
+2025-10-12 06:18:05,523 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:05,525 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-07 12:40:00 to 2025-10-08 12:40:00 (TF: 1, Mode: min)
+2025-10-12 06:18:05,532 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:05,750 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for GBPUSD. from ticks
+2025-10-12 06:18:05,750 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:05,754 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-07 12:50:00 to 2025-10-08 12:50:00 (TF: 1, Mode: min)
+2025-10-12 06:18:05,761 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:05,975 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for GBPUSD. from ticks
+2025-10-12 06:18:05,975 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:05,977 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-07 00:00:00 to 2025-10-07 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:05,985 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:06,121 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:06,121 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:06,124 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-07 12:36:00 to 2025-10-08 12:36:00 (TF: 1, Mode: min)
+2025-10-12 06:18:06,130 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:06,279 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:06,279 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:06,283 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-07 13:37:00 to 2025-10-08 13:37:00 (TF: 1, Mode: min)
+2025-10-12 06:18:06,291 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:06,443 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:06,443 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:06,444 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-08 00:00:00 to 2025-10-08 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:06,452 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:06,658 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for GBPUSD. from ticks
+2025-10-12 06:18:06,658 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:06,660 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-08 00:00:00 to 2025-10-08 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:06,666 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:06,822 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:06,822 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:06,824 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-08 12:56:00 to 2025-10-09 12:56:00 (TF: 1, Mode: min)
+2025-10-12 06:18:06,831 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:06,985 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:06,986 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:06,990 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-08 13:11:00 to 2025-10-09 13:11:00 (TF: 1, Mode: min)
+2025-10-12 06:18:06,997 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:07,153 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:07,153 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:07,155 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-09 00:00:00 to 2025-10-09 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:07,162 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:07,415 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for GBPUSD. from ticks
+2025-10-12 06:18:07,415 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:07,418 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-09 12:54:00 to 2025-10-10 12:54:00 (TF: 1, Mode: min)
+2025-10-12 06:18:07,424 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:07,681 | connection | INFO | fetch_bars_from_mt5:176 | Created 1423 min bars for GBPUSD. from ticks
+2025-10-12 06:18:07,681 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:07,683 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-09 13:07:00 to 2025-10-10 13:07:00 (TF: 1, Mode: min)
+2025-10-12 06:18:07,691 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:07,965 | connection | INFO | fetch_bars_from_mt5:176 | Created 1423 min bars for GBPUSD. from ticks
+2025-10-12 06:18:07,966 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:07,967 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-09 00:00:00 to 2025-10-09 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:07,975 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:08,170 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:08,171 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:08,173 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-09 13:07:00 to 2025-10-10 13:07:00 (TF: 1, Mode: min)
+2025-10-12 06:18:08,181 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:08,359 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:08,359 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:08,362 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-09 13:28:00 to 2025-10-10 13:28:00 (TF: 1, Mode: min)
+2025-10-12 06:18:08,369 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:08,548 | connection | INFO | fetch_bars_from_mt5:176 | Created 1429 min bars for EURUSD. from ticks
+2025-10-12 06:18:08,549 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:08,550 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-10 00:00:00 to 2025-10-10 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:08,558 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:08,825 | connection | INFO | fetch_bars_from_mt5:176 | Created 1422 min bars for GBPUSD. from ticks
+2025-10-12 06:18:08,825 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:08,829 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-10 13:56:00 to 2025-10-11 13:56:00 (TF: 1, Mode: min)
+2025-10-12 06:18:08,836 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,038 | connection | INFO | fetch_bars_from_mt5:176 | Created 813 min bars for GBPUSD. from ticks
+2025-10-12 06:18:09,039 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,042 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-10 00:00:00 to 2025-10-10 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,048 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,212 | connection | INFO | fetch_bars_from_mt5:176 | Created 1428 min bars for EURUSD. from ticks
+2025-10-12 06:18:09,213 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,215 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-10 14:48:00 to 2025-10-11 14:48:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,222 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,341 | connection | INFO | fetch_bars_from_mt5:176 | Created 761 min bars for EURUSD. from ticks
+2025-10-12 06:18:09,342 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,345 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-10 14:57:00 to 2025-10-11 14:57:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,352 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,470 | connection | INFO | fetch_bars_from_mt5:176 | Created 752 min bars for EURUSD. from ticks
+2025-10-12 06:18:09,470 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,471 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-11 00:00:00 to 2025-10-11 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,479 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,518 | connection | INFO | fetch_bars_from_mt5:176 | Created 209 min bars for GBPUSD. from ticks
+2025-10-12 06:18:09,518 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,519 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-11 00:00:00 to 2025-10-11 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,525 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,543 | connection | INFO | fetch_bars_from_mt5:176 | Created 209 min bars for EURUSD. from ticks
+2025-10-12 06:18:09,543 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,543 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-12 00:00:00 to 2025-10-12 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,550 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,551 | connection | WARNING | fetch_bars_from_mt5:77 | No tick data available for GBPUSD. in range.
+2025-10-12 06:18:09,551 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,551 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-12 00:00:00 to 2025-10-12 23:59:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,557 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:09,557 | connection | WARNING | fetch_bars_from_mt5:77 | No tick data available for EURUSD. in range.
+2025-10-12 06:18:09,557 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:09,558 | connection | INFO | fetch_bars_from_mt5:70 | Fetching GBPUSD. bars from 2025-10-01 00:00:00 to 2025-10-12 00:00:00 (TF: 1, Mode: min)
+2025-10-12 06:18:09,566 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:11,423 | connection | INFO | fetch_bars_from_mt5:176 | Created 11634 min bars for GBPUSD. from ticks
+2025-10-12 06:18:11,423 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success
+2025-10-12 06:18:11,720 | connection | INFO | fetch_bars_from_mt5:70 | Fetching EURUSD. bars from 2025-10-01 00:00:00 to 2025-10-12 00:00:00 (TF: 1, Mode: min)
+2025-10-12 06:18:11,727 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_established | status=success
+2025-10-12 06:18:13,082 | connection | INFO | fetch_bars_from_mt5:176 | Created 11640 min bars for EURUSD. from ticks
+2025-10-12 06:18:13,082 | connection | INFO | log_connection_event:210 | CONNECTION_EVENT | event_type=connection_closed | status=success

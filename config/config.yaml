@@ -5,10 +5,7 @@ system:
 
 # Paths Configuration  
 paths:
-  logs: "logs"
-  data: "data"
-  outputs: "outputs"
-  strategies: "src/strategies"
+  logs: "reports/logs"
 
 # Account Settings
 account:
@@ -49,8 +46,8 @@ mt5:
 # Data Settings
 data:
   timeframe: "M1"
-  mode: "mid"
-  max_bars_memory: 1000
+  mode: "min"
+  max_bars_memory: 720
 
 # Strategy Configurations
 strategies:
@@ -66,11 +63,11 @@ strategies:
       num_hunt_main: 2
       num_hunt_recovery: 1
     mbox_time:
-      start: "01:00"
-      end: "09:00"
+      start: "04:30"
+      end: "12:30"
     session_time:
-      start: "09:01"
-      end: "13:00"
+      start: "12:31"
+      end: "16:30"
     choch:
       window: 15
       tolerance: 5
@@ -88,8 +85,8 @@ strategies:
 
 # Backtesting Settings
 backtesting:
-  default_start: "2024-08-01"
-  default_end: "2024-08-31"
+  default_start: "2001-09-11"
+  default_end: "2001-09-11"
   save_results: true
   output_format: "csv"
 
@@ -109,14 +106,13 @@ logging:
     backtest: "backtest.log"
     connection: "connection.log"
     system: "system.log"
-    orders: "orders.log"
     signals: "signals.log"
 
 plotting:
   default_chart_type: "interactive"  # or "static"
   report_directory: "reports"
   auto_open_browser: false
-  save_static_backup: true
+  save_static_backup: false
 
 live_trading:
   work_interval: 1

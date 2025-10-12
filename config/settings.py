@@ -179,10 +179,7 @@ class Settings:
     def get_paths(self) -> Dict[str, str]:
         """Get all configured paths"""
         return {
-            'logs': self.get('paths.logs_dir', 'logs'),
-            'data': self.get('paths.data_dir', 'data'),
-            'outputs': self.get('paths.outputs_dir', 'outputs'),
-            'config': self.get('paths.config_dir', 'config')
+            'logs': self.get('paths.logs', 'report/logs')
         }
 
 

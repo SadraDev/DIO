@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 import pandas as pd
 from pathlib import Path
@@ -69,17 +69,14 @@ class BacktestEngine:
             days_processed = 0
             bars_processed = 0
             while current_date <= end_date:
-
                 current_date_start = datetime(current_date.year, current_date.month, current_date.day, hour=0, minute=0)
                 current_date_end = datetime(current_date.year, current_date.month, current_date.day, hour=23, minute=59)
 
                 for symbol in symbols:
-
                     daily_bars = self.data_fetcher.fetch_bars_from_mt5(current_date_start, current_date_end, symbol)
                     bars_processed += len(daily_bars)
-                    
+                   
                     if daily_bars:
-                        
                         strategy.symbol = symbol
                         strategy.add_bars(daily_bars)
                         main_signal = strategy.attempt_signal(current_date)
@@ -97,7 +94,7 @@ class BacktestEngine:
                                 
                                 if main_signal.outcome.value == 'loss':
                                     
-                                    recovery_signal = strategy.attempt_signal(current_date, main_signal)
+                                    recovery_signal = strategy.attempt_signal(current_date, faild_signal=main_signal)
                                     
                                     if recovery_signal:
                                         recovery_signal.evaluate_signal()

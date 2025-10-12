@@ -2,6 +2,7 @@ import MetaTrader5 as mt5
 from typing import List
 import datetime as dt
 from collections import defaultdict
+from zoneinfo import ZoneInfo
 
 from src.core.models.bar import Bar
 from config.settings import settings
@@ -50,7 +51,7 @@ class DataFetcher:
             log_connection_event("connection_closed", "success")
         except Exception as e:
             log_connection_event("connection_close_error", "warning", error=str(e))
-    
+
     def fetch_bars_from_mt5(
         self,
         start_dt: dt.datetime,
@@ -60,174 +61,159 @@ class DataFetcher:
         mode: str = None
     ) -> List[Bar]:
         """
-        Fetch OHLCV bars from MT5 with different pricing modes
-        
-        Args:
-            start_dt: Start datetime
-            end_dt: End datetime  
-            symbol: Trading symbol
-            timeframe: Timeframe string (M1, M5, etc.)
-            mode: Pricing mode - 'bid', 'ask', 'mid', 'hybrid'
-            
-        Returns:
-            List of Bar objects
+        Fetch OHLCV bars from MT5 using only tick data (copy_ticks_range),
+        supporting pricing modes: 'bid', 'ask', 'mid', 'hybrid', 'min', 'max'.
         """
-        # Use defaults if not specified
         tf = timeframe or self.default_timeframe
-        mode = mode or self.default_mode
-        
-        self.logger.info(f"Fetching {symbol} bars from {start_dt} to {end_dt} (TF: {timeframe}, Mode: {mode})")
-        
+        mode = (mode or self.default_mode).lower()
+
+        self.logger.info(f"Fetching {symbol} bars from {start_dt} to {end_dt} (TF: {tf}, Mode: {mode})")
         self._ensure_connection()
-        
+
         try:
-            # Get basic rate data
-            rates = mt5.copy_rates_range(symbol, tf, start_dt, end_dt)
-            
-            if rates is None or len(rates) == 0:
-                self.logger.warning(f"No rate data found for {symbol}")
-                return []
-            
-            self.logger.debug(f"Retrieved {len(rates)} rate records for {symbol}")
-            
-            # For bid mode, use rates directly
-            if mode.lower() == "bid":
-                bars = [
-                    Bar(
-                        timestamp=dt.datetime.utcfromtimestamp(r['time']),
-                        open_price=float(r['open']),
-                        high=float(r['high']),
-                        low=float(r['low']),
-                        close=float(r['close']),
-                        volume=int(r['tick_volume'])
-                    )
-                    for r in rates
-                ]
-                self.logger.info(f"Created {len(bars)} bid bars for {symbol}")
-                return bars
-            
-            # For other modes, need tick data
+            # Pull raw ticks for the interval (both info and trade ticks)
             ticks = mt5.copy_ticks_range(symbol, start_dt, end_dt, mt5.COPY_TICKS_ALL)
-            
             if ticks is None or len(ticks) == 0:
-                self.logger.warning(f"No tick data available for {symbol}, falling back to bid prices")
-                # Fallback to bid prices
-                return self._create_bars_from_rates(rates, mode="bid")
-            
+                self.logger.warning(f"No tick data available for {symbol} in range.")
+                return []
+
             self.logger.debug(f"Retrieved {len(ticks)} ticks for {symbol}")
-            
-            # Group ticks by candle periods
+
+            # Group ticks into candle buckets according to timeframe
             candle_ticks = self._group_ticks_by_candle(ticks, tf)
-            
-            # Create bars with tick-based pricing
-            bars = self._create_bars_from_ticks(rates, candle_ticks, mode)
-            
-            self.logger.info(f"Created {len(bars)} {mode} bars for {symbol}")
+
+            # Build bars from tick groups using requested price mode
+            bars: List[Bar] = []
+
+            for candle_start, ticks_in_candle in sorted(candle_ticks.items()):
+                if not ticks_in_candle:
+                    continue
+
+                bids, asks, mids = [], [], []
+                # Also build per-tick extrema series for min/max modes
+                series_min_per_tick, series_max_per_tick = [], []
+
+                for t in ticks_in_candle:
+                    b = float(t['bid']) if 'bid' in t.dtype.names else None
+                    a = float(t['ask']) if 'ask' in t.dtype.names else None
+
+                    # Collect sides if present
+                    if b is not None and b == b:
+                        bids.append(b)
+                    if a is not None and a == a:
+                        asks.append(a)
+
+                    # Mid for other modes (not used for min/max extremization)
+                    if b is not None and a is not None and b == b and a == a:
+                        mids.append(0.5 * (b + a))
+                    elif b is not None and b == b:
+                        mids.append(b)
+                    elif a is not None and a == a:
+                        mids.append(a)
+
+                    # Extrema per tick (exclude mid so extremes come from actual sides)
+                    candidates = []
+                    if b is not None and b == b:
+                        candidates.append(b)
+                    if a is not None and a == a:
+                        candidates.append(a)
+                    if candidates:
+                        series_min_per_tick.append(min(candidates))
+                        series_max_per_tick.append(max(candidates))
+
+                if mode in ("bid", "ask", "mid"):
+                    series = bids if mode == "bid" else asks if mode == "ask" else mids
+                    if not series:
+                        continue
+                    open_price = series[0]
+                    close_price = series[-1]
+                    high_price = max(series)
+                    low_price = min(series)
+
+                elif mode == "hybrid":
+                    # Open/Close prefer mid; High from Ask; Low from Bid; with fallbacks
+                    if not (bids or asks or mids):
+                        continue
+                    open_price = (mids[0] if mids else (bids[0] if bids else asks[0]))
+                    close_price = (mids[-1] if mids else (bids[-1] if bids else asks[-1]))
+                    high_price = (max(asks) if asks else (max(bids) if bids else close_price))
+                    low_price = (min(bids) if bids else (min(asks) if asks else close_price))
+
+                elif mode == "max":
+                    # Use the per-tick maxima stream so OHLC are all "max-side" extremas but not identical
+                    if not series_max_per_tick:
+                        continue
+                    series = series_max_per_tick
+                    open_price = series[0]
+                    close_price = series[-1]
+                    high_price = max(series)
+                    low_price = min(series)
+
+                elif mode == "min":
+                    # Use the per-tick minima stream so OHLC are all "min-side" extremas but not identical
+                    if not series_min_per_tick:
+                        continue
+                    series = series_min_per_tick
+                    open_price = series[0]
+                    close_price = series[-1]
+                    high_price = max(series)
+                    low_price = min(series)
+
+                else:
+                    raise ValueError(f"Unknown pricing mode: {mode}")
+
+                bars.append(
+                    Bar(
+                        timestamp=candle_start,
+                        open_price=float(open_price),
+                        high=float(high_price),
+                        low=float(low_price),
+                        close=float(close_price),
+                        volume=int(len(ticks_in_candle)),  # tick count as volume
+                    )
+                )
+
+            self.logger.info(f"Created {len(bars)} {mode} bars for {symbol} from ticks")
             return bars
-            
+
         except Exception as e:
             self.logger.error(f"Error fetching bars for {symbol}: {e}")
             raise
         finally:
             self._close_connection()
-    
+
+
     def _group_ticks_by_candle(self, ticks, timeframe) -> dict:
-        """Group ticks by their corresponding candle periods"""
+        """
+        Group ticks by their corresponding candle periods using a timeframe like 'M1','M5','M15','H1','H4','D1','W1','MN1' or an integer minute count.
+        """
+        from collections import defaultdict
+
+        def timeframe_to_minutes(tf_val):
+            if isinstance(tf_val, int):
+                return tf_val
+            tf_val = str(tf_val).upper()
+            mapping = {
+                "M1": 1, "M2": 2, "M3": 3, "M4": 4, "M5": 5, "M10": 10, "M15": 15, "M30": 30,
+                "H1": 60, "H2": 120, "H3": 180, "H4": 240, "H6": 360, "H8": 480, "H12": 720,
+                "D1": 1440, "W1": 10080, "MN1": 43200
+            }
+            if tf_val not in mapping:
+                raise ValueError(f"Unsupported timeframe: {tf_val}")
+            return mapping[tf_val]
+
+        minutes_per_candle = timeframe_to_minutes(timeframe)
         candle_ticks = defaultdict(list)
-        minutes_per_candle = timeframe // mt5.TIMEFRAME_M1
-        
+
         for tick in ticks:
-            tick_dt = dt.datetime.utcfromtimestamp(tick['time'])
-            # Calculate candle start time
-            candle_start = tick_dt - dt.timedelta(
-                minutes=tick_dt.minute % minutes_per_candle,
-                seconds=tick_dt.second,
-                microseconds=tick_dt.microsecond
-            )
+            tick_dt = dt.datetime.fromtimestamp(int(tick['time']))
+            # Align to the start of the timeframe bucket
+            aligned_minute = tick_dt.minute - (tick_dt.minute % minutes_per_candle)
+            candle_start = tick_dt.replace(minute=aligned_minute, second=0, microsecond=0)
             candle_ticks[candle_start].append(tick)
-        
+
         return candle_ticks
-    
-    def _create_bars_from_rates(self, rates, mode: str = "bid") -> List[Bar]:
-        """Create bars directly from rate data"""
-        return [
-            Bar(
-                timestamp=dt.datetime.utcfromtimestamp(r['time']),
-                open_price=float(r['open']),
-                high=float(r['high']),
-                low=float(r['low']),
-                close=float(r['close']),
-                volume=int(r['tick_volume'])
-            )
-            for r in rates
-        ]
-    
-    def _create_bars_from_ticks(self, rates, candle_ticks: dict, mode: str) -> List[Bar]:
-        """Create bars using tick data for accurate bid/ask/mid pricing"""
-        bars = []
-        
-        for rate in rates:
-            candle_time = dt.datetime.utcfromtimestamp(rate['time'])
-            ticks_for_candle = candle_ticks.get(candle_time, [])
-            
-            if not ticks_for_candle:
-                # No ticks for this candle, use rate data
-                bars.append(Bar(
-                    timestamp=candle_time,
-                    open_price=float(rate['open']),
-                    high=float(rate['high']),
-                    low=float(rate['low']),
-                    close=float(rate['close']),
-                    volume=int(rate['tick_volume'])
-                ))
-                continue
-            
-            # Extract prices from ticks
-            bid_prices = [tick['bid'] for tick in ticks_for_candle]
-            ask_prices = [tick['ask'] for tick in ticks_for_candle]
-            mid_prices = [(b + a) / 2 for b, a in zip(bid_prices, ask_prices)]
-            
-            # Calculate OHLC based on mode
-            if mode.lower() == "ask":
-                open_price = ask_prices[0]
-                high_price = max(ask_prices)
-                low_price = min(ask_prices)
-                close_price = ask_prices[-1]
-                
-            elif mode.lower() == "mid":
-                open_price = mid_prices[0]
-                high_price = max(mid_prices)
-                low_price = min(mid_prices)
-                close_price = mid_prices[-1]
-                
-            elif mode.lower() == "hybrid":
-                # Use bid/ask extremes for high/low
-                is_green = rate['close'] > rate['open']
-                
-                # For hybrid mode, use most conservative pricing
-                high_price = max(max(bid_prices), max(ask_prices))
-                low_price = min(min(bid_prices), min(ask_prices))
-                
-                if is_green:
-                    open_price = min(bid_prices[0], ask_prices[0])
-                    close_price = max(bid_prices[-1], ask_prices[-1])
-                else:
-                    open_price = max(bid_prices[0], ask_prices[0])
-                    close_price = min(bid_prices[-1], ask_prices[-1])
-                    
-            else:
-                raise ValueError(f"Unknown pricing mode: {mode}")
-            
-            bars.append(Bar(
-                timestamp=candle_time,
-                open_price=open_price,
-                high=high_price,
-                low=low_price,
-                close=close_price,
-                volume=int(rate['tick_volume'])
-            ))
-        
-        return bars
+
     
     def get_available_symbols(self) -> List[str]:
         """Get list of available trading symbols"""
@@ -323,7 +309,7 @@ class DataFetcher:
                 raise RuntimeError(error_msg)
             
             rate = rates[0]  # Get the single rate record
-            candle_time = dt.datetime.utcfromtimestamp(rate['time'])
+            candle_time = dt.datetime.fromtimestamp(rate['time'])
             
             self.logger.debug(f"Retrieved latest rate for {symbol} at {candle_time}")
             

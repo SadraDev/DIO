@@ -121,11 +121,11 @@ class TwoHuntersStrategy(BaseStrategy):
         """Get MBox session bars for the target date"""
         mbox_start = datetime.combine(target_date.date(), self.mbox_time[0])
         mbox_end = datetime.combine(target_date.date(), self.mbox_time[1])
-        
         mbox_bars = [
             bar for bar in self.all_bars 
             if mbox_start <= bar.timestamp <= mbox_end
         ]
+        # print(self.all_bars[0].timestamp)
         
         self.logger.debug(f"Found {len(mbox_bars)} MBox bars for {target_date.date()}")
         return mbox_bars
@@ -146,10 +146,9 @@ class TwoHuntersStrategy(BaseStrategy):
     def add_bars(self, bars: List[Bar]):
         """Add new bars to strategy state"""
         with self._state_lock:
+            self.all_bars = []
             self.all_bars.extend(bars)
-            max_bars = settings.get("data.max_bars_memory", 1000)
-            if len(self.all_bars) > max_bars:
-                self.all_bars = self.all_bars[-max_bars:]
+            max_bars = settings.get("data.max_bars_memory", 720)
         
         self.logger.debug(f"Added {len(bars)} bars for {self.symbol}, total: {len(self.all_bars)}")
     
@@ -294,7 +293,7 @@ class TwoHuntersStrategy(BaseStrategy):
         
         # Analyze MBox for market bias
         mbox_result = self.mbox_analyzer.calculate(mbox_bars)
-        
+
         # Hunt for breakout
         if faild_signal is None:
             self.breakout_engine.num_hunt = self.config.get("breakout.num_hunt_main", 2)
@@ -342,8 +341,7 @@ class TwoHuntersStrategy(BaseStrategy):
         else:
             signal.trend = faild_signal.trend
             signal.fake_CHoCH = faild_signal.fake_CHoCH
-            signal.time_flag = faild_signal.time_flag        
-            signal.is_recovery = True
+            signal.time_flag = faild_signal.time_flag
 
         # Check strategy flags
         if not self.check_strategy_flags(signal):

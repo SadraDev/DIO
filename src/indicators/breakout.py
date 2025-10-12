@@ -83,17 +83,19 @@ class BreakoutEngine(BaseIndicator):
             this_bar = bars[i]
             prev_bar = bars[i - 1] if i > 0 else bars[0]
 
-            # Skip weak bars going backwards until a strong one is found
-            search_idx = i - 1
-            while search_idx >= 0 and bars[search_idx].is_weak:
-                search_idx -= 1
-            
-            if search_idx >= 0:
-                prev_bar = bars[search_idx]
+            if self._is_order_bar(prev_bar, this_bar, direction):                
 
-            signal = self._is_order_bar(prev_bar, this_bar, direction)
-            if signal:
-                return signal
+                # Skip weak bars going backwards until a strong one is found
+                search_idx = i - 1
+                while search_idx >= 0 and bars[search_idx].is_weak:
+                    search_idx -= 1
+                
+                if search_idx >= 0:
+                    prev_bar = bars[search_idx]
+
+                signal = self._is_order_bar(prev_bar, this_bar, direction)
+                if signal:
+                    return signal
 
         return None
 
@@ -106,16 +108,12 @@ class BreakoutEngine(BaseIndicator):
 
         if direction == 'SELL':
             # Bearish momentum confirmation
-            margin = prev_bar.body * 0.2
-            if (min(this_bar.open, this_bar.close) < min(prev_bar.open, prev_bar.close) + margin 
-                and (this_bar.close - this_bar.open) < 0):
+            if (this_bar.close < prev_bar.low and (this_bar.close - this_bar.open) < 0):
                 return this_bar
 
         elif direction == 'BUY':
             # Bullish momentum confirmation
-            margin = prev_bar.body * 0.2
-            if (max(this_bar.open, this_bar.close) > max(prev_bar.open, prev_bar.close) - margin 
-                and (this_bar.close - this_bar.open) >= 0):
+            if (this_bar.close > prev_bar.high and (this_bar.close - this_bar.open) >= 0):
                 return this_bar
 
         return None

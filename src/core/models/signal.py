@@ -78,7 +78,7 @@ class Signal:
     @property
     def is_recovery(self) -> bool:
         """Check if this is a recovery signal"""
-        return self.signal_type == SignalType.RECOVERY
+        return self.signal_type == SignalType.RECOVERY if SignalOutcome.LOSS else SignalType.MAIN
     
     @property
     def is_main(self) -> bool:
@@ -171,8 +171,6 @@ class Signal:
                 end_dt=self.timestamp + timedelta(hours=24*(fetch_attempts)),
                 symbol=self.symbol)
 
-            print(self.timestamp, evaluation_bars[0], fetcher.get_latest_bar(self.symbol))
-
             # Check if we have any bars to evaluate
             if not evaluation_bars:
                 log_signal_event("no_bars_for_evaluation", self.symbol, self.action.value,
@@ -189,6 +187,7 @@ class Signal:
                 risk_amount = abs(self.initial_entry_price - self.initial_stop_loss)
                 risk_free_1r_applied = False
                 risk_free_2r_applied = False
+                lil_boy = False
             
             # SINGLE LOOP: Process bars chronologically  
             for bar in evaluation_bars:
@@ -218,7 +217,7 @@ class Signal:
                             self.entry_lot, "SELL"
                         )
 
-                        if self.initial_entry_price < self.stop_loss:
+                        if self.initial_entry_price <= self.stop_loss:
                             self.update_outcome(SignalOutcome.LOSS, actual_loss, bar.timestamp)
                             log_signal_event("signal_loss", self.symbol, self.action.value,
                                             loss=actual_loss, exit_price=self.stop_loss,
@@ -226,7 +225,7 @@ class Signal:
                                             lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
                                             fetch_attempts=fetch_attempts)
                         else:
-                            self.update_outcome(SignalOutcome.WIN, actual_loss, bar.timestamp)
+                            self.update_outcome(SignalOutcome.WIN if not lil_boy else SignalOutcome.LOSS, actual_loss, bar.timestamp)
                             log_signal_event("signal_win", self.symbol, self.action.value,
                                             gain=actual_loss, exit_price=self.stop_loss,
                                             pips=budget.pips_from_diff(abs(self.initial_entry_price - self.stop_loss)),
@@ -257,7 +256,7 @@ class Signal:
                             self.entry_lot, "BUY"
                         )
                         
-                        if self.initial_entry_price > self.stop_loss:
+                        if self.initial_entry_price >= self.stop_loss:
                             self.update_outcome(SignalOutcome.LOSS, actual_loss, bar.timestamp)
                             log_signal_event("signal_loss", self.symbol, self.action.value,
                                             loss=actual_loss, exit_price=self.stop_loss,
@@ -265,7 +264,7 @@ class Signal:
                                             lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
                                             fetch_attempts=fetch_attempts)
                         else:
-                            self.update_outcome(SignalOutcome.WIN, actual_loss, bar.timestamp)
+                            self.update_outcome(SignalOutcome.WIN if not lil_boy else SignalOutcome.LOSS, actual_loss, bar.timestamp)
                             log_signal_event("signal_win", self.symbol, self.action.value,
                                             gain=actual_loss, exit_price=self.stop_loss,
                                             pips=budget.pips_from_diff(abs(self.stop_loss - self.initial_entry_price)),
@@ -281,14 +280,23 @@ class Signal:
                         # 1R favorable movement (price going down)
                         if not risk_free_1r_applied and bar.low <= self.initial_entry_price - risk_amount:
                             if self.stop_loss >= self.initial_stop_loss:
-                                new_sl = self.initial_stop_loss - risk_amount / 2
-                                self.adjust_stop_loss(new_sl, "1R_favorable")
+                                if abs(self.timestamp.minute - bar.timestamp.minute) <= 2:
+                                    new_sl = self.initial_entry_price - risk_amount * 0.5
+                                    lil_boy = True
+                                    self.take_profit - 3*risk_amount
+                                else:
+                                    new_sl = self.initial_stop_loss - risk_amount / 2
+
+                                self.adjust_stop_loss(new_sl, "1R_favorable" if not lil_boy else "GET OUT")
                                 risk_free_1r_applied = True
                         
                         # 2R breakeven
                         if not risk_free_2r_applied and bar.low <= self.initial_entry_price - 2 * risk_amount:
                             if self.initial_entry_price < self.stop_loss <= self.initial_stop_loss:
-                                self.adjust_stop_loss(self.initial_entry_price, "2R_breakeven")
+                                if abs(self.timestamp.minute - bar.timestamp.minute) <= 2:
+                                    self.adjust_stop_loss(self.initial_entry_price - risk_amount * 1.5, "2R_breakeven" if not lil_boy else "GET OUT")
+                                else:
+                                    self.adjust_stop_loss(self.initial_entry_price, "2R_breakeven")
                                 risk_free_2r_applied = True
                         
                         # Near TP profit locking
@@ -296,20 +304,33 @@ class Signal:
                             new_sl = bar.low + 0.25 * risk_amount
                             new_tp = bar.low - 0.25 * risk_amount  
                             self.adjust_stop_loss(new_sl, "near_tp_lock")
-                            self.take_profit = new_tp
+                            self.take_profit = new_tp if not lil_boy else self.take_profit
+                        
+                        if lil_boy == True:
+                            self.outcome == SignalOutcome.LOSS
 
                     elif self.action == SignalAction.BUY:
                         # 1R favorable movement (price going up)
                         if not risk_free_1r_applied and bar.high >= self.initial_entry_price + risk_amount:
                             if self.stop_loss <= self.initial_stop_loss:
-                                new_sl = self.initial_stop_loss + risk_amount / 2
-                                self.adjust_stop_loss(new_sl, "1R_favorable")
+                                if abs(self.timestamp.minute - bar.timestamp.minute) <= 2:
+                                    new_sl = self.initial_entry_price + risk_amount * 0.5
+                                    lil_boy = True
+                                    self.take_profit + 3*risk_amount
+                                else:
+                                    new_sl = self.initial_stop_loss + risk_amount / 2
+                                
+                                self.adjust_stop_loss(new_sl, "1R_favorable" if not lil_boy else "GET OUT")
                                 risk_free_1r_applied = True
                         
                         # 2R breakeven
                         if not risk_free_2r_applied and bar.high >= self.initial_entry_price + 2 * risk_amount:
                             if self.initial_entry_price > self.stop_loss >= self.initial_stop_loss:
-                                self.adjust_stop_loss(self.initial_entry_price, "2R_breakeven")
+                                if abs(self.timestamp.minute - bar.timestamp.minute) <= 2:
+                                    self.adjust_stop_loss(self.initial_entry_price + risk_amount * 1.5, "2R_breakeven" if not lil_boy else "GET OUT")
+                                else:
+                                    self.adjust_stop_loss(self.initial_entry_price, "2R_breakeven" if not lil_boy else "GET OUT")
+                                    
                                 risk_free_2r_applied = True
                         
                         # Near TP profit locking
@@ -317,9 +338,11 @@ class Signal:
                             new_sl = bar.high - 0.25 * risk_amount
                             new_tp = bar.high + 0.25 * risk_amount
                             self.adjust_stop_loss(new_sl, "near_tp_lock") 
-                            self.take_profit = new_tp
-                
+                            self.take_profit = new_tp if not lil_boy else self.take_profit
 
+                        if lil_boy == True:
+                            self.outcome == SignalOutcome.LOSS
+                
             # If we've processed all current bars without an outcome, try to fetch more
             if fetch_attempts < max_fetch_attempts and not self.is_completed:
                 log_signal_event("signal_not_resolved", self.symbol, self.action.value,
