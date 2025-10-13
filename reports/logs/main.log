@@ -1,4 +1,0 @@
-2025-10-12 06:18:14,067 | main | INFO | create_performance_report:266 | Performance report saved: reports\full_report_20251012_061813\GBPUSD._performance.html
-2025-10-12 06:18:14,112 | main | INFO | create_performance_report:266 | Performance report saved: reports\full_report_20251012_061813\EURUSD._performance.html
-2025-10-12 06:18:14,145 | main | INFO | create_symbol_comparison_report:922 | Simplified symbol comparison report saved: reports\full_report_20251012_061813\symbol_comparison.html
-2025-10-12 06:18:14,156 | main | INFO | generate_full_trading_report:76 | Full trading report generated: reports\full_report_20251012_061813\index.html

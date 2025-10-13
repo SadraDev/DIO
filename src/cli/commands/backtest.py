@@ -95,7 +95,7 @@ def run_backtest(
                 logger.error(f"Error creating chart for {symbol}: {e}")
         
         # Generate comprehensive reports if requested
-        if create_report and (bars_data or signals_data):
+        if create_report:
             try:
                 # Import ReportGenerator here to avoid circular imports
                 from src.core.reporting.report_generator import ReportGenerator
@@ -124,7 +124,7 @@ def run_backtest(
             'report_directory': report_dir,
             'symbols_plotted': len([s for s in symbols if s in bars_data])
         }
-        
+
         logger.info(f"Plotting completed. Generated {len(all_charts)} charts.")
         
     except Exception as e:

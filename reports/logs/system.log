@@ -1,7 +1,0 @@
-2025-10-12 06:18:00,830 | system | INFO | initialize:47 | Logging system initialized successfully
-2025-10-12 06:18:01,422 | system | INFO | log_system_event:236 | SYSTEM_EVENT | event_type=backtest_started | symbols=['GBPUSD.', 'EURUSD.'] | start_date=2025-10-01T00:00:00 | end_date=2025-10-12T00:00:00 | initial_balance=10000
-2025-10-12 06:18:09,557 | system | INFO | log_system_event:236 | SYSTEM_EVENT | event_type=backtest_completed | symbols=['GBPUSD.', 'EURUSD.'] | total_signals=25 | overall_profit=1021.1275000004473
-2025-10-12 06:19:15,769 | system | INFO | initialize:47 | Logging system initialized successfully
-2025-10-12 06:19:22,260 | system | INFO | initialize:47 | Logging system initialized successfully
-2025-10-12 06:19:29,587 | system | INFO | initialize:47 | Logging system initialized successfully
-2025-10-12 06:19:37,298 | system | INFO | initialize:47 | Logging system initialized successfully

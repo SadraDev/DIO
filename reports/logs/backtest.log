@@ -1,9 +1,0 @@
-2025-10-12 06:18:01,422 | backtest | INFO | run_backtest:29 | Starting backtest: ['GBPUSD.', 'EURUSD.'] from 2025-10-01 00:00:00 to 2025-10-12 00:00:00
-2025-10-12 06:18:01,423 | backtest | INFO | run_backtest:64 | Fetching data for ['GBPUSD.', 'EURUSD.'] from 2025-10-01 00:00:00 to 2025-10-12 00:00:00
-2025-10-12 06:18:09,557 | backtest | INFO | run_backtest:42 | Generating plots and reports...
-2025-10-12 06:18:09,558 | backtest | INFO | run_backtest:56 | Generating chart for GBPUSD.
-2025-10-12 06:18:11,709 | backtest | INFO | run_backtest:92 | Chart created for GBPUSD.: reports\GBPUSD._interactive_20251012_061811.html
-2025-10-12 06:18:11,709 | backtest | INFO | run_backtest:56 | Generating chart for EURUSD.
-2025-10-12 06:18:13,133 | backtest | INFO | run_backtest:92 | Chart created for EURUSD.: reports\EURUSD._interactive_20251012_061813.html
-2025-10-12 06:18:14,156 | backtest | INFO | run_backtest:111 | Comprehensive report generated: reports\full_report_20251012_061813\index.html
-2025-10-12 06:18:14,157 | backtest | INFO | run_backtest:128 | Plotting completed. Generated 2 charts.

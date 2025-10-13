@@ -70,14 +70,14 @@ def cli(ctx, config, verbose, quiet):
 @click.option('--no-plots', is_flag=True, default=False,
               help='Skip chart generation (backtest only)')
 @click.pass_context
-def backtest(ctx, symbols, start_date, end_date, balance, risk, 
+def backtest(ctx, symbol, start_date, end_date, balance, risk, 
              save_results, output_dir, show_signals, show_sessions, 
              show_choch, interactive, create_report, no_plots):
     """Run backtesting on historical data with integrated plotting"""
     from .commands.backtest import run_backtest
     
     # Use defaults if not provided
-    symbols = list(symbols) if symbols else settings.symbols
+    symbols = list(symbol) if symbol else settings.symbols
     
     if not start_date:
         from datetime import datetime

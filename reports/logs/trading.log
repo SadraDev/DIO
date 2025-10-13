@@ -1,4 +1,0 @@
-2025-10-12 06:18:01,422 | trading | INFO | __init__:77 | TwoHunters strategy initialized:
-2025-10-12 06:18:01,422 | trading | INFO | __init__:78 | MBox Hours: 04:30:00 - 12:30:00
-2025-10-12 06:18:01,422 | trading | INFO | __init__:79 | Session Hours: 2
-2025-10-12 06:18:01,423 | trading | INFO | add_strategy:26 | Added strategy: Two-Hunters_None
