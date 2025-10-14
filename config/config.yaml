@@ -68,6 +68,12 @@ strategies:
     session_time:
       start: "12:31"
       end: "16:30"
+    # mbox_time:
+    #   start: "06:42"
+    #   end: "06:49"
+    # session_time:
+    #   start: "06:43"
+    #   end: "13:30"
     choch:
       window: 15
       tolerance: 5
@@ -82,13 +88,24 @@ strategies:
       use_trend_flag: false
       use_time_flag: false
       use_choch_flag: false
+    backtesting:
+      default_start: "2001-09-11"
+      default_end: "2001-09-11"
+      save_results: true
+      output_format: "csv"
+    live_trading:
+      work_interval: 1
+      max_concurrent_symbols: 5
+      enable_monitoring: true
+      monitoring_port: 8765
+      emergency_stop_loss_percent: 0.10
+      system_hours:
+        start: "18:30"
+        end: "20:30"
+      # system_hours:
+      #   start: "02:00"
+      #   end: "13:30"
 
-# Backtesting Settings
-backtesting:
-  default_start: "2001-09-11"
-  default_end: "2001-09-11"
-  save_results: true
-  output_format: "csv"
 
 # Logging Configuration
 logging:
@@ -113,16 +130,6 @@ plotting:
   report_directory: "reports"
   auto_open_browser: false
   save_static_backup: false
-
-live_trading:
-  work_interval: 1
-  max_concurrent_symbols: 5
-  enable_monitoring: true
-  monitoring_port: 8765
-  emergency_stop_loss_percent: 0.10
-  system_hours:
-    start: "09:30"
-    end: "13:30"
 
 monitoring:
   websocket_host: "localhost"

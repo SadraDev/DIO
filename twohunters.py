@@ -6,7 +6,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 # Now we can import using absolute paths from project root
-from src.cli.main import cli
+from src.cli.two_hunters import two_hunters_cli
 
 if __name__ == "__main__":
-    cli()
+    two_hunters_cli()

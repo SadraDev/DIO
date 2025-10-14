@@ -8,6 +8,7 @@ sys.path.insert(0, str(project_root))
 
 from config.settings import settings
 from src.core.utils.logger import TradingLogger, log_system_event
+from src.core.execution.mt5_connection import MT5Connection
 
 
 @click.group()
@@ -17,8 +18,8 @@ from src.core.utils.logger import TradingLogger, log_system_event
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
 @click.option('--quiet', '-q', is_flag=True, help='Suppress output except errors')
 @click.pass_context
-def cli(ctx, config, verbose, quiet):
-   
+def two_hunters_cli(ctx, config, verbose, quiet):
+    
     # Initialize context object
     ctx.ensure_object(dict)
     ctx.obj['verbose'] = verbose
@@ -41,7 +42,7 @@ def cli(ctx, config, verbose, quiet):
     if not quiet:
         click.echo(f"{settings.system_name} v{settings.system_version}")
 
-@cli.command()
+@two_hunters_cli.command()
 @click.option('--symbol', '-s', multiple=True, 
               help='Trading symbol (e.g., EURUSD, GBPUSD)')
 @click.option('--start-date', '-sd', type=click.DateTime(formats=['%Y-%m-%d']),
@@ -74,18 +75,19 @@ def backtest(ctx, symbol, start_date, end_date, balance, risk,
              save_results, output_dir, show_signals, show_sessions, 
              show_choch, interactive, create_report, no_plots):
     """Run backtesting on historical data with integrated plotting"""
-    from .commands.backtest import run_backtest
-    
+    from src.strategies.two_hunters import TwoHuntersStrategy
+    twohunters = TwoHuntersStrategy()
+
     # Use defaults if not provided
     symbols = list(symbol) if symbol else settings.symbols
     
     if not start_date:
         from datetime import datetime
-        start_date = datetime.strptime(settings.get('backtesting.default_start', '2025-08-01'), '%Y-%m-%d')
+        start_date = datetime.strptime(settings.get('strategies.two_hunters.backtesting.default_start', '2001-09-11'), '%Y-%m-%d')
     
     if not end_date:
         from datetime import datetime
-        end_date = datetime.strptime(settings.get('backtesting.default_end', '2025-08-31'), '%Y-%m-%d')
+        end_date = datetime.strptime(settings.get('strategies.two_hunters.backtesting.default_end', '2001-09-11'), '%Y-%m-%d')
     
     balance = balance or settings.initial_balance
     risk = risk or settings.default_risk_percent
@@ -102,7 +104,7 @@ def backtest(ctx, symbol, start_date, end_date, balance, risk,
             click.echo(f"Charts: Disabled")
     
     try:
-        results = run_backtest(
+        results = twohunters.backtest(
             symbols=symbols,
             start_date=start_date,
             end_date=end_date,
@@ -142,5 +144,56 @@ def backtest(ctx, symbol, start_date, end_date, balance, risk,
         sys.exit(1)
 
 
+# NEW LIVE COMMAND - ADDED HERE
+@two_hunters_cli.command()
+@click.option('--symbol', '-s', multiple=True, 
+              help='Trading symbol (e.g., EURUSD, GBPUSD). If not provided, uses symbols from config.')
+@click.option('--risk', '-r', help='Risk percent to risk. If not provided, uses default from config.')
+@click.pass_context
+def live(ctx, symbol, risk):
+    """Start live trading with the Two Hunters strategy"""
+    
+    from src.core.models.budget import Budget
+    from src.strategies.two_hunters import TwoHuntersStrategy
+    
+    mt5 = MT5Connection()
+
+    # Resolve symbols
+    symbols = list(symbol) if symbol else settings.get('trading.symbols', ['EURUSD.', 'GBPUSD.'])
+
+    # Handle risk configuration
+    risk = settings.get('account.default_risk_percent', 0.01)
+
+    # Detect account balance
+    account = mt5.get_account_info()
+    if account is not None and hasattr(account, "balance"):
+        balance = float(account.balance)
+        settings.set('account.initial_balance', balance)
+        if not ctx.obj['quiet']:
+            click.echo(f"Account balance detected from MT5: ${balance:,.2f}")
+    else:
+        balance = settings.get('account.initial_balance', 1000.0)
+        if not ctx.obj['quiet']:
+            click.echo(f"Account balance fallback (config): ${balance:,.2f}")
+
+    if not ctx.obj['quiet']:
+        click.echo(f"Starting live trading with Two Hunters strategy")
+        click.echo(f"Symbols: {', '.join(symbols)}")
+        click.echo(f"Balance: ${balance:,.2f}")
+        click.echo(f"  Risk per trade: {risk:.2%}")
+        click.echo()
+        click.echo("Press Ctrl+C to stop live trading")
+        click.echo("=" * 50)
+
+    budget = Budget(initial_risk_percent=risk, initial_balance=balance)
+    twohunters = TwoHuntersStrategy(budget=budget)
+    twohunters.budget.initial_balance = balance
+    twohunters.budget.initial_risk_percent
+    
+    try:
+        twohunters.live(symbols)
+    except Exception as e:
+        click.echo("Error running live.")
+
 if __name__ == '__main__':
-    cli()
+    two_hunters_cli()

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 
 from src.core.models.bar import Bar
-from src.core.models.signal import Signal, SignalAction
+from src.core.models.signal import Signal, SignalAction, SignalOutcome
 from config.settings import settings
 from src.core.utils.logger import TradingLogger, log_connection_event, log_order_event
 
@@ -109,33 +109,22 @@ class MT5Connection:
             log_connection_event("account_info_error", "error", error=str(e))
             return None
     
-    def get_last_bars(self, symbol: str, count: int = 2) -> Optional[List[Bar]]:
+    def order_is_open(self, symbol: str) -> Optional[List[Bar]]:
         """Fetch the most recent bars for a symbol"""
         if not self.ensure_connection():
             return None
         
         try:
-            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, count)
-            
-            if rates is None or len(rates) == 0:
-                self.logger.warning(f"No recent bars found for {symbol}")
-                return None
-            
-            bars = []
-            for rate in rates:
-                bars.append(Bar(
-                    timestamp=datetime.utcfromtimestamp(rate["time"]),
-                    open_price=float(rate["open"]),
-                    high=float(rate["high"]),
-                    low=float(rate["low"]),
-                    close=float(rate["close"]),
-                    volume=int(rate["tick_volume"])
-                ))
-            
-            return bars
+            orders = mt5.orders_get(symbol=symbol)
+            if orders is None:
+                self.logger.info("No open orders")
+                return False
+            else:
+                self.logger.warning(f"Order open for {symbol}")
+                return True
             
         except Exception as e:
-            log_connection_event("bar_fetch_error", "error", symbol=symbol, error=str(e))
+            log_order_event("failed to get orders", symbol, {e})
             return None
     
     def place_order(self, signal: Signal) -> bool:
@@ -144,6 +133,11 @@ class MT5Connection:
             return False
         
         try:
+            selected = mt5.symbol_select(signal.symbol, True)
+            if not selected:
+                log_order_event("symbol_select_failed", signal.symbol, signal.action.value, error="Symbol not selected in Market Watch")
+                return False
+            
             # Get current price
             tick = mt5.symbol_info_tick(signal.symbol)
             if not tick:
@@ -170,14 +164,12 @@ class MT5Connection:
                 "tp": signal.take_profit,
                 "deviation": self.deviation,
                 "magic": self.magic_number,
-                "comment": f"TwoHunters_{signal.action.value}",
+                "comment": f"From_TwoHunters",
                 "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
             }
             
             # Send order
             result = mt5.order_send(request)
-            
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 signal.ticket = result.order
                 signal.entry_price = price
@@ -266,7 +258,11 @@ class MT5Connection:
                     hasattr(deal, "profit")):
                     
                     signal.gain = deal.profit
-                    signal.outcome = "win" if deal.profit >= 0 else "loss"
+                    if not signal.lil_boy:
+                        signal.outcome = SignalOutcome.WIN if deal.profit >= 0 else SignalOutcome.LOSS
+                    else:
+                        signal.outcome = SignalOutcome.LOSS
+                    
                     signal.outcome_timestamp = datetime.fromtimestamp(deal.time)
                     
                     log_order_event("order_closed", signal.symbol, signal.action.value,
@@ -384,7 +380,3 @@ class MT5Connection:
             return False
         finally:
             self.shutdown_connection()
-
-
-# Compatibility alias for existing code
-Connection = MT5Connection

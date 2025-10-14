@@ -61,6 +61,7 @@ class Signal:
         self.outcome_timestamp: Optional[datetime] = None
         self.exit_pips: Optional[float] = None
         self.exit_price: Optional[float] = None
+        self.lil_boy: bool = False
         self.gain = gain
         
         # Order execution details
@@ -73,12 +74,6 @@ class Signal:
         
         # Risk management tracking
         self.sl_adjusted_count = 0
-    
-    # PROPERTIES (Unchanged)
-    @property
-    def is_recovery(self) -> bool:
-        """Check if this is a recovery signal"""
-        return self.signal_type == SignalType.RECOVERY if SignalOutcome.LOSS else SignalType.MAIN
     
     @property
     def is_main(self) -> bool:

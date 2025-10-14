@@ -1,21 +1,25 @@
+import asyncio
 import threading
-
-from datetime import datetime, time, timedelta
-from typing import List, Optional, Dict, Any, Tuple
+import json
+import time as goodtimes
+from datetime import datetime, timedelta, time, date
+from typing import Dict, List, Optional, Tuple, Any
+from pathlib import Path
+import signal as os_signal
 from collections import defaultdict
 
-from src.strategies.base import BaseStrategy
-from src.core.models.signal import Signal, SignalAction, SignalType
+from src.core.models.signal import Signal, SignalAction, SignalType, SignalOutcome
 from src.core.models.bar import Bar
 from src.core.models.budget import Budget
 from src.indicators.breakout import BreakoutEngine
 from src.indicators.mbox import MBoxAnalyzer
 from src.indicators.choch import FakeCHoCHDetector
-from src.core.utils.logger import TradingLogger, log_signal_event
+from src.core.execution.mt5_connection import MT5Connection
+from src.core.data.fetcher import DataFetcher
+from src.core.utils.logger import TradingLogger, log_signal_event, log_system_event, log_order_event
 from config.settings import settings
 
-
-class TwoHuntersStrategy(BaseStrategy):
+class TwoHuntersStrategy():
     """
     Two Hunters Strategy Implementation
     
@@ -30,17 +34,15 @@ class TwoHuntersStrategy(BaseStrategy):
     - Session Hours: When trading analysis and signal generation happens
     """
     
-    def __init__(self, name: str = "Two-Hunters"):
+    def __init__(self, name: str = "Two-Hunters", budget: Budget = None):
         # Load strategy configuration
         self.config = settings.get_strategy_config("two_hunters")
-        
-        self._state_lock = threading.Lock()
 
         # Initialize indicators
         self._init_indicators()
 
         # Initialize budget
-        self.budget = Budget()
+        self.budget = Budget() if budget is None else budget
         self.name = name
 
         # Symbol
@@ -125,7 +127,6 @@ class TwoHuntersStrategy(BaseStrategy):
             bar for bar in self.all_bars 
             if mbox_start <= bar.timestamp <= mbox_end
         ]
-        # print(self.all_bars[0].timestamp)
         
         self.logger.debug(f"Found {len(mbox_bars)} MBox bars for {target_date.date()}")
         return mbox_bars
@@ -145,10 +146,8 @@ class TwoHuntersStrategy(BaseStrategy):
     
     def add_bars(self, bars: List[Bar]):
         """Add new bars to strategy state"""
-        with self._state_lock:
-            self.all_bars = []
-            self.all_bars.extend(bars)
-            max_bars = settings.get("data.max_bars_memory", 720)
+        self.all_bars = []
+        self.all_bars.extend(bars)
         
         self.logger.debug(f"Added {len(bars)} bars for {self.symbol}, total: {len(self.all_bars)}")
     
@@ -169,8 +168,7 @@ class TwoHuntersStrategy(BaseStrategy):
         detections = self.fake_choch_detector.detect(analysis_bars)
         
         if detections:
-            with self._state_lock:
-                self.fake_chochs.extend(detections)
+            self.fake_chochs.extend(detections)
             self.logger.debug(f"Detected {len(detections)} fake CHoCH patterns")
             return True
         
@@ -342,6 +340,7 @@ class TwoHuntersStrategy(BaseStrategy):
             signal.trend = faild_signal.trend
             signal.fake_CHoCH = faild_signal.fake_CHoCH
             signal.time_flag = faild_signal.time_flag
+            signal.is_main = faild_signal.is_main
 
         # Check strategy flags
         if not self.check_strategy_flags(signal):
@@ -412,3 +411,440 @@ class TwoHuntersStrategy(BaseStrategy):
                 "use_choch_flag": self.use_choch_flag
             }
         }
+
+    def backtest(
+        self,
+        symbols: List[str],
+        start_date: datetime,
+        end_date: datetime,
+        initial_balance: float,
+        output_dir: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Run backtesting on historical data with integrated plotting"""
+        logger = TradingLogger.get_backtest_logger()
+        from src.core.utils.plotter import TradingPlotter
+        from src.core.data.fetcher import DataFetcher
+
+        fetcher = DataFetcher()
+
+        logger.info(f"Starting backtest: {symbols} from {start_date} to {end_date}")
+        
+        log_system_event("backtest_started", 
+                        symbols=symbols, 
+                        start_date=start_date.isoformat(),
+                        end_date=end_date.isoformat(),
+                        initial_balance=initial_balance)
+        
+        results = {}
+        for symbol in symbols:
+            results[symbol] = []
+
+        try:
+            # Fetch historical data
+            self.logger.info(f"Fetching data for {symbols} from {start_date} to {end_date}")
+
+            # Process day by day
+            current_date = start_date
+            signals = []
+            days_processed = 0
+            bars_processed = 0
+            while current_date <= end_date:
+                current_date_start = datetime(current_date.year, current_date.month, current_date.day, hour=0, minute=0)
+                current_date_end = datetime(current_date.year, current_date.month, current_date.day, hour=23, minute=59)
+
+                for symbol in symbols:
+                    daily_bars = fetcher.fetch_bars_from_mt5(current_date_start, current_date_end, symbol)
+                    bars_processed += len(daily_bars)
+                   
+                    if daily_bars:
+                        self.symbol = symbol
+                        self.add_bars(daily_bars)
+                        main_signal = self.attempt_signal(current_date)
+                        
+                        if main_signal:
+                            main_signal.evaluate_signal()
+                            
+                            if main_signal.is_completed:
+                                results[symbol].append(main_signal)
+                                signals.append(main_signal)
+                                self.budget.apply_signal_gain(main_signal)
+                                
+                                self.logger.debug(f"Main signal completed: {main_signal.outcome.value}, "
+                                                f"Gain: {main_signal.gain}")
+                                
+                                if main_signal.outcome.value == 'loss':
+                                    
+                                    recovery_signal = self.attempt_signal(current_date, faild_signal=main_signal)
+                                    
+                                    if recovery_signal:
+                                        recovery_signal.evaluate_signal()
+                                        
+                                        if recovery_signal.is_completed:
+                                            results[symbol].append(recovery_signal)
+                                            signals.append(recovery_signal)
+                                            self.budget.apply_signal_gain(recovery_signal)
+                                            
+                                            self.logger.debug(f"Recovery signal completed: "
+                                                            f"{recovery_signal.outcome.value}, "
+                                                            f"Gain: {recovery_signal.gain}")
+                        
+                days_processed += 1
+                current_date += timedelta(days=1)
+            
+            # Evaluate prop status
+            self.budget.evaluate_prop_status(signals)
+
+            results["all"] = {
+                    'signals': signals,
+                    'budget': self.budget,
+                    'bars_processed': bars_processed,
+                    'days_processed': days_processed
+                }
+
+            # Generate summary
+            overall_summary = self._generate_overall_summary(results)
+            results['_summary'] = overall_summary
+            
+            log_system_event("backtest_completed", 
+                            symbols=symbols,
+                            total_signals=overall_summary.get('total_signals', 0),
+                            overall_profit=overall_summary.get('total_profit', 0))
+
+            # Integrated plotting functionality
+            logger.info("Generating plots and reports...")
+            
+            try:
+                # Initialize plotter
+                report_dir = output_dir or "reports"
+                plotter = TradingPlotter(report_dir=report_dir)
+                fetcher = DataFetcher()
+                
+                all_charts = []
+                bars_data = {}
+                signals_data = {}
+                
+                for symbol in symbols:
+                    try:
+                        logger.info(f"Generating chart for {symbol}")
+                        
+                        # Get backtest results for this symbol
+                        signals = results.get(f"{symbol}.signals", {})
+                        
+                        # Fetch bars (same data used in backtest)
+                        bars = fetcher.fetch_bars_from_mt5(start_date, end_date, symbol)
+                        if not bars:
+                            logger.warning(f"No data found for {symbol}")
+                            continue
+                        
+                        # Store data for comprehensive report
+                        bars_data[symbol] = bars
+                        if signals:
+                            signals_data[symbol] = signals
+                        
+                        # Generate interactive chart with actual signals from backtest
+                        chart_path = plotter.plot_candlestick_interactive(
+                            bars=bars,
+                            signals=signals if True else None,
+                            symbol=symbol,
+                            title=f"{symbol} Backtest Analysis ({start_date.date()} to {end_date.date()})"
+                        )
+                        all_charts.append(chart_path)
+                        
+                        logger.info(f"Chart created for {symbol}: {chart_path}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error creating chart for {symbol}: {e}")
+                
+                # Generate comprehensive reports if requested
+                try:
+                    # Import ReportGenerator here to avoid circular imports
+                    from src.core.reporting.report_generator import ReportGenerator
+                    
+                    report_gen = ReportGenerator(report_dir)
+                    report_path = report_gen.generate_full_trading_report(
+                        symbols=symbols,
+                        bars_data=bars_data,
+                        results=results,
+                        report_title=f"Backtest Report: {start_date.date()} to {end_date.date()}"
+                    )
+                    
+                    logger.info(f"Comprehensive report generated: {report_path}")
+                    
+                except Exception as e:
+                    import sys, traceback
+                    tb = traceback.extract_tb(sys.exc_info()[2])[-1]
+                    filename = tb.filename
+                    lineno = tb.lineno
+
+                    logger.error(f"Error generating comprehensive report: {e} (File: {filename}, line {lineno})")
+            
+                # Update results with plotting information
+                results['plotting'] = {
+                    'charts': all_charts,
+                    'report_directory': report_dir,
+                    'symbols_plotted': len([s for s in symbols if s in bars_data])
+                }
+
+                logger.info(f"Plotting completed. Generated {len(all_charts)} charts.")
+                
+            except Exception as e:
+                logger.error(f"Error in plotting integration: {e}")
+                # Don't fail the entire backtest if plotting fails
+            
+            return results
+        
+        except Exception as e:
+            log_system_event("backtest_error", error=str(e))
+            raise
+
+    def live(self, symbols):
+        threads = []
+        for symbol in symbols:
+            try:
+                twohunters = TwoHuntersStrategy()
+                
+                twohunters.budget = self.budget
+                twohunters.symbol = symbol
+
+                thread = threading.Thread(
+                    target=twohunters.run_live_for_symbol,
+                )
+
+                threads.append(thread)
+                thread.start()
+
+            except Exception as e:
+                self.logger.error(f"Error craeting thread for {symbol}: {e}")
+
+    def run_live_for_symbol(self):
+        """
+        Live trading implementation with two states: sleeping and active trading
+        
+        States:
+        1. Sleeping State: Monitor system time, wait for trading hours
+        2. Live Trading State: Execute strategy during system hours
+        """
+
+        # Initialize components
+        mt5_conn = MT5Connection()
+        
+        # Get system hours from config
+        start_time_str = settings.get("strategies.two_hunters.live_trading.system_hours.start")
+        end_time_str = settings.get("strategies.two_hunters.live_trading.system_hours.end")
+        
+        start_time = datetime.strptime(start_time_str, "%H:%M").time()
+        end_time = datetime.strptime(end_time_str, "%H:%M").time()
+        
+        # Work interval from config
+        work_interval = settings.get("strategies.two_hunters.live_trading.work_interval", 1)
+        
+        # Daily signals file path
+        signals_dir = Path("reports/signals")
+        signals_dir.mkdir(exist_ok=True)
+        
+        self.logger.info("Live trading started")
+        self.logger.info(f"System hours: {start_time_str} - {end_time_str}")
+        
+        try:
+            while True:
+                current_time = datetime.now().time()
+                current_date = date.today()
+                
+                # Check if we're within system hours
+                if start_time <= current_time <= end_time:
+                    # LIVE TRADING STATE
+                    self.logger.info("Entering live trading state")
+                    
+                    # Initialize daily signals file
+                    daily_signals_file = signals_dir / f"signals_{current_date.strftime('%Y%m%d')}.json"
+                    processed_signals = self._load_daily_signals(daily_signals_file)
+                    
+                    try:
+                        self._execute_live_trading_for_symbol(
+                            current_date,
+                            daily_signals_file,
+                            processed_signals
+                        )
+                    
+                    except Exception as e:
+                        self.logger.error(f"Error trading {self.symbol}: {e}")
+                        continue
+                    
+                    # Sleep for work interval
+                    goodtimes.sleep(work_interval)
+                    
+                else:
+                    # SLEEPING STATE
+                    if current_time < start_time:
+                        wait_time = datetime.combine(current_date, start_time) - datetime.now()
+                    else:  # current_time > end_time
+                        # Wait until next day's start time
+                        next_day = current_date + timedelta(days=1)
+                        wait_time = datetime.combine(next_day, start_time) - datetime.now()
+                    
+                    wait_seconds = max(60, wait_time.total_seconds())  # Minimum 1 minute wait
+                    self.logger.info(f"Sleeping state - waiting {wait_seconds/60:.1f} minutes until trading hours")
+                    goodtimes.sleep(min(wait_seconds, 300))  # Max 5 minute sleep intervals
+                    
+        except KeyboardInterrupt:
+            self.logger.info("Live trading interrupted by user")
+        except Exception as e:
+            self.logger.error(f"Critical error in live trading: {e}")
+            raise
+
+    def _execute_live_trading_for_symbol(self, current_date: date, daily_signals_file: Path, processed_signals: dict):
+        """Execute live trading logic for a specific symbol"""
+        
+        symbol = self.symbol
+        signal_key = f"{symbol}_{current_date.strftime('%Y%m%d')}"
+        rec_signal_key = f"{symbol}_{current_date.strftime('%Y%m%d')}_rec"
+
+        mt5_conn = MT5Connection()
+        data_fetcher = DataFetcher()
+
+        # Fetch latest bars
+        end_time = datetime.now()
+        start_time = end_time - timedelta(hours=12)  # Get enough data for analysis
+        
+        new_bars = data_fetcher.fetch_bars_from_mt5(start_time, end_time, symbol)
+        
+        if not new_bars:
+            self.logger.warning(f"No bars fetched for {symbol}")
+            return
+        
+        # Update strategy bars
+        self.all_bars = new_bars
+        live_bar = self.all_bars.pop()
+
+        # Check if we already have main signal for this symbol today
+        if signal_key in processed_signals:
+            existing_signal = processed_signals[signal_key]
+            signal = self._reconstruct_signal_from_dict(existing_signal)
+        else:
+            # Main signal generation
+            signal = self.attempt_signal(datetime.now())
+        
+        if signal and not signal.is_completed and not mt5_conn.order_is_open(signal):
+            if mt5_conn.place_order(signal):
+
+                # Save signal to daily file
+                processed_signals[signal_key] = signal.to_dict()
+                self._save_daily_signals(daily_signals_file, processed_signals)
+                
+                self.logger.info(f"Signal generated and order placed for {symbol}: {signal}")
+        
+        if signal and mt5_conn.order_is_open(signal):
+            risk_free_tiggered = signal.risk_free()
+
+            if risk_free_tiggered:
+                mt5_conn.update_order(signal)
+
+                # Save signal to daily file
+                processed_signals[signal_key] = signal.to_dict()
+                self._save_daily_signals(daily_signals_file, processed_signals)
+                
+                self.logger.info(f"Signal SL/TP updated for {symbol}: {signal}")
+
+        if signal and mt5_conn.check_order_status(signal):
+            # Save signal to daily file
+            processed_signals[signal_key] = signal.to_dict()
+            self._save_daily_signals(daily_signals_file, processed_signals)
+            
+            self.logger.info(f"Signal concluded for {symbol}: {signal}")
+
+            if signal.outcome.value == 'loss':
+                # Check if we already have recovery signal for this symbol today
+                if rec_signal_key in processed_signals:
+                    existing_signal = processed_signals[rec_signal_key]
+                    rec_signal = self._reconstruct_signal_from_dict(existing_signal)
+                else:
+                    # Reecovery signal generation
+                    rec_signal = self.attempt_signal(datetime().now(), signal)
+
+                if rec_signal and not rec_signal.is_completed and not mt5_conn.order_is_open(rec_signal):
+                    if mt5_conn.place_order(rec_signal):
+
+                        # Save signal to daily file
+                        processed_signals[rec_signal_key] = rec_signal.to_dict()
+                        self._save_daily_signals(daily_signals_file, processed_signals)
+                        
+                        self.logger.info(f"Recovery Signal generated and order placed for {symbol}: {rec_signal}")
+                
+                if rec_signal and mt5_conn.order_is_open(rec_signal):
+                    risk_free_tiggered = rec_signal.risk_free()
+
+                    if risk_free_tiggered:
+                        mt5_conn.update_order(rec_signal)
+
+                        # Save signal to daily file
+                        processed_signals[rec_signal_key] = rec_signal.to_dict()
+                        self._save_daily_signals(daily_signals_file, processed_signals)
+                        
+                        self.logger.info(f"Signal SL/TP updated for {symbol}: {signal}")
+                    
+                if rec_signal and mt5_conn.check_order_status(rec_signal):
+                    # Save signal to daily file
+                    processed_signals[rec_signal_key] = rec_signal.to_dict()
+                    self._save_daily_signals(daily_signals_file, processed_signals)
+                    
+                    self.logger.info(f"Signal concluded for {symbol}: {rec_signal}")
+
+                if rec_signal.is_completed and signal.is_completed:
+                    try:
+                        mt5_conn.shutdown_connection()
+                    except:
+                        pass
+                    self.logger.info("Live trading stopped")
+
+    def _load_daily_signals(self, signals_file: Path) -> dict:
+        """Load daily signals from JSON file"""
+        
+        if signals_file.exists():
+            try:
+                with open(signals_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self.logger.warning(f"Error loading signals file: {e}")
+        
+        return {}
+
+    def _save_daily_signals(self, signals_file: Path, signals: dict):
+        """Save signals to daily JSON file"""
+        
+        try:
+            with open(signals_file, 'w') as f:
+                json.dump(signals, f, indent=2, default=str)
+        except IOError as e:
+            self.logger.error(f"Error saving signals file: {e}")
+
+    def _reconstruct_signal_from_dict(self, signal_dict: dict):
+        """Reconstruct Signal object from dictionary"""
+        
+        from src.core.models.signal import Signal, SignalAction, SignalType, SignalOutcome
+        from datetime import datetime
+        
+        # Create basic signal
+        signal = Signal(
+            action=SignalAction(signal_dict['action']),
+            entry_price=signal_dict['entry_price'],
+            stop_loss=signal_dict['stop_loss'],
+            take_profit=signal_dict['take_profit'],
+            symbol=signal_dict['symbol'],
+            timestamp=datetime.fromisoformat(signal_dict['timestamp']),
+            signal_type=SignalType(signal_dict.get('signaltype', 'main'))
+        )
+        
+        # Set additional attributes
+        signal.ticket = signal_dict.get('ticket')
+        signal.entry_lot = signal_dict.get('entry_lot')
+        signal.gain = signal_dict.get('gain')
+        
+        # Set outcome if exists
+        if signal_dict.get('outcome'):
+            signal.outcome = SignalOutcome(signal_dict['outcome'])
+            if signal_dict.get('outcome_timestamp'):
+                signal.outcome_timestamp = datetime.fromisoformat(signal_dict['outcome_timestamp'])
+        
+        return signal
+

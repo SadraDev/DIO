@@ -812,7 +812,6 @@ class TradingPlotter:
         charts_html = ""
         if joint_stats.get('signals'):
             fig_cumulative = self.create_joint_cumulative_chart(joint_stats['signals'])
-            # FIX: use a real dict (not {{...}}) and build the div first
             chart_div = pyo.plot(
                 fig_cumulative,
                 output_type='div',
