@@ -170,11 +170,11 @@ class Settings:
     
     def get_strategy_config(self, strategy_name: str) -> Dict[str, Any]:
         """Get configuration for specific strategy"""
-        return self.get(f'strategy.{strategy_name}', {})
+        return self.get(f'strategies.{strategy_name}', {})
     
     def get_indicator_config(self, strategy_name: str, indicator_name: str) -> Dict[str, Any]:
         """Get indicator configuration for specific strategy"""
-        return self.get(f'strategy.{strategy_name}.{indicator_name}', {})
+        return self.get(f'strategies.{strategy_name}.{indicator_name}', {})
     
     def get_paths(self) -> Dict[str, str]:
         """Get all configured paths"""

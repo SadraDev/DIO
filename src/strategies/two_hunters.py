@@ -2,7 +2,7 @@ import asyncio
 import threading
 import json
 import time as goodtimes
-from datetime import datetime, timedelta, time, date
+from datetime import datetime, timedelta, time, date, timezone
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 import signal as os_signal
@@ -184,6 +184,7 @@ class TwoHuntersStrategy():
         
         entry_price = signal_bar.close
         loss_margin = self.budget.diff_from_pips(self.margin_pips)
+        commission = settings.get("trading.commission")
         
         # Fair Value Gap (FVG) logic
         min_fvg, max_fvg = self.fvg_range
@@ -197,27 +198,30 @@ class TwoHuntersStrategy():
             return 1.0 - (fvg_size_pips * 0.5) / max_fvg
         
         if action == SignalAction.SELL:
+            # Check for bullish FVG
             if before_bar.low > after_bar.high:
                 fvg_size_pips = self.budget.pips_from_diff(before_bar.low - after_bar.high)
                 scale = dynamic_fvg_scale(fvg_size_pips)
-                entry_price = before_bar.low - (before_bar.low - after_bar.high)
+                entry_price = before_bar.low - (before_bar.low - after_bar.high) * scale
                 
                 self.logger.debug(f"SELL FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f} -- NOT USED --")
             
+            entry_price = signal_bar.close
             stop_loss = self.ratios["stop_loss"] * (extrema + loss_margin)
-            take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss)
+            take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss) - commission
         
         elif action == SignalAction.BUY:
-            # Check for bullish FVG  
+            # Check for bullish FVG
             if after_bar.low > before_bar.high:
                 fvg_size_pips = self.budget.pips_from_diff(after_bar.low - before_bar.high)
                 scale = dynamic_fvg_scale(fvg_size_pips)
-                entry_price = before_bar.high + (after_bar.low - before_bar.high)
+                entry_price = before_bar.high + (after_bar.low - before_bar.high) * scale
                 
                 self.logger.debug(f"BUY FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f} -- NOT USED --")
             
+            entry_price = signal_bar.close
             stop_loss = self.ratios["stop_loss"] * (extrema - loss_margin)
-            take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss)
+            take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss) + commission
         
         self.logger.debug(f"Entry calculation: EP={entry_price:.5f}, SL={stop_loss:.5f}, TP={take_profit:.5f}")
         return entry_price, stop_loss, take_profit
@@ -283,7 +287,7 @@ class TwoHuntersStrategy():
 
         # Get required bars
         mbox_bars = self.get_mbox_bars(target_date)
-        session_bars = self.get_session_bars(target_date)
+        session_bars = self.get_session_bars(target_date)[:-1] # exclude live bar
         
         if not mbox_bars or len(session_bars) < 5:
             self.logger.debug(f"Insufficient bars: MBox={len(mbox_bars)}, Session={len(session_bars)}")
@@ -325,7 +329,7 @@ class TwoHuntersStrategy():
         # Create signal
         signal = self.create_signal(
             action_enum, entry_price, stop_loss, take_profit,
-            signal_bar.timestamp, SignalType.MAIN
+            signal_bar.timestamp, SignalType.MAIN if faild_signal is None else SignalType.RECOVERY
         )
         
         if not signal:
@@ -340,7 +344,6 @@ class TwoHuntersStrategy():
             signal.trend = faild_signal.trend
             signal.fake_CHoCH = faild_signal.fake_CHoCH
             signal.time_flag = faild_signal.time_flag
-            signal.is_main = faild_signal.is_main
 
         # Check strategy flags
         if not self.check_strategy_flags(signal):
@@ -351,7 +354,25 @@ class TwoHuntersStrategy():
         signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
         signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
-        
+
+        if signal.entry_lot > signal.stop_loss_pips:
+            signal.emergency = True
+            commission_amount = settings.get("trading.commission")
+            _multiplier = (1.5, 2.5) if signal.is_main else (2.5, 4.0)
+            _ratio = abs(signal.initial_entry_price - signal.initial_stop_loss)
+
+            if signal.is_sell:
+                signal.stop_loss   = signal.initial_entry_price + (_multiplier[0] * _ratio) + commission_amount
+                signal.take_profit = signal.initial_entry_price - (_multiplier[1] * _ratio) - commission_amount
+
+            if signal.is_buy:
+                signal.stop_loss   = signal.initial_entry_price - (_multiplier[0] * _ratio) - commission_amount
+                signal.take_profit = signal.initial_entry_price + (_multiplier[1] * _ratio) + commission_amount
+
+            signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
+            signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+            signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
+
         # Log signal generation
         log_signal_event(
             "main_signal_generated", self.symbol, action_enum.value,
@@ -417,14 +438,15 @@ class TwoHuntersStrategy():
         symbols: List[str],
         start_date: datetime,
         end_date: datetime,
-        initial_balance: float,
+        no_risk_manager: bool,
         output_dir: Optional[str] = None,
-        **kwargs
+        **args
     ) -> Dict[str, Any]:
         """Run backtesting on historical data with integrated plotting"""
         logger = TradingLogger.get_backtest_logger()
         from src.core.utils.plotter import TradingPlotter
         from src.core.data.fetcher import DataFetcher
+        import click
 
         fetcher = DataFetcher()
 
@@ -434,7 +456,7 @@ class TwoHuntersStrategy():
                         symbols=symbols, 
                         start_date=start_date.isoformat(),
                         end_date=end_date.isoformat(),
-                        initial_balance=initial_balance)
+                        initial_balance=self.budget.initial_balance)
         
         results = {}
         for symbol in symbols:
@@ -449,27 +471,27 @@ class TwoHuntersStrategy():
             signals = []
             days_processed = 0
             bars_processed = 0
-            while current_date <= end_date:
+            while current_date < end_date:
                 current_date_start = datetime(current_date.year, current_date.month, current_date.day, hour=0, minute=0)
                 current_date_end = datetime(current_date.year, current_date.month, current_date.day, hour=23, minute=59)
 
                 for symbol in symbols:
                     daily_bars = fetcher.fetch_bars_from_mt5(current_date_start, current_date_end, symbol)
                     bars_processed += len(daily_bars)
-                   
+                
                     if daily_bars:
                         self.symbol = symbol
                         self.add_bars(daily_bars)
                         main_signal = self.attempt_signal(current_date)
                         
                         if main_signal:
-                            main_signal.evaluate_signal()
+                            main_signal.evaluate_signal(risk_manager=not no_risk_manager)
                             
                             if main_signal.is_completed:
                                 results[symbol].append(main_signal)
                                 signals.append(main_signal)
                                 self.budget.apply_signal_gain(main_signal)
-                                
+
                                 self.logger.debug(f"Main signal completed: {main_signal.outcome.value}, "
                                                 f"Gain: {main_signal.gain}")
                                 
@@ -478,19 +500,21 @@ class TwoHuntersStrategy():
                                     recovery_signal = self.attempt_signal(current_date, faild_signal=main_signal)
                                     
                                     if recovery_signal:
-                                        recovery_signal.evaluate_signal()
+                                        recovery_signal.evaluate_signal(risk_manager=not no_risk_manager)
                                         
                                         if recovery_signal.is_completed:
                                             results[symbol].append(recovery_signal)
                                             signals.append(recovery_signal)
                                             self.budget.apply_signal_gain(recovery_signal)
-                                            
+
                                             self.logger.debug(f"Recovery signal completed: "
                                                             f"{recovery_signal.outcome.value}, "
                                                             f"Gain: {recovery_signal.gain}")
                         
                 days_processed += 1
                 current_date += timedelta(days=1)
+                commission_loss = sum([s.commission for s in signals])
+                click.echo(f"Date: {current_date.date()} --> Running Balance: {round(self.budget.current_balance)}$ + {round(commission_loss)}$ <--")
             
             # Evaluate prop status
             self.budget.evaluate_prop_status(signals)
@@ -501,96 +525,79 @@ class TwoHuntersStrategy():
                     'bars_processed': bars_processed,
                     'days_processed': days_processed
                 }
-
-            # Generate summary
-            overall_summary = self._generate_overall_summary(results)
-            results['_summary'] = overall_summary
             
             log_system_event("backtest_completed", 
                             symbols=symbols,
-                            total_signals=overall_summary.get('total_signals', 0),
-                            overall_profit=overall_summary.get('total_profit', 0))
+                            total_signals=len(signals),
+                            overall_profit=self.budget.current_balance)
 
             # Integrated plotting functionality
-            logger.info("Generating plots and reports...")
+            _generate = True
+            if not args['no_reports'] and not args['no_plots']:
+                click.echo("Generating plots and reports. This will take time..")
+                logger.info("Generating plots and reports...")
+
+            if args['no_reports'] and args['no_plots']:
+                click.echo("Generated nothing.")
+                _generate = False
+
+            if args['no_reports'] ^ args['no_plots']:
+                op = "plots" if not args['no_plots'] else "reports"
+                click.echo(f"Generating {op}..") 
+                logger.info(f"Generating {op}...")
             
-            try:
-                # Initialize plotter
-                report_dir = output_dir or "reports"
-                plotter = TradingPlotter(report_dir=report_dir)
-                fetcher = DataFetcher()
-                
-                all_charts = []
-                bars_data = {}
-                signals_data = {}
-                
-                for symbol in symbols:
-                    try:
-                        logger.info(f"Generating chart for {symbol}")
-                        
-                        # Get backtest results for this symbol
-                        signals = results.get(f"{symbol}.signals", {})
-                        
-                        # Fetch bars (same data used in backtest)
+            if _generate:
+                try:
+                    # Initialize plotter
+                    report_dir = output_dir or "reports"
+                    fetcher = DataFetcher()
+                    
+                    all_charts = []
+                    bars_data = {}
+
+                    for symbol in symbols:
+                        # Fetch bars
                         bars = fetcher.fetch_bars_from_mt5(start_date, end_date, symbol)
                         if not bars:
                             logger.warning(f"No data found for {symbol}")
-                            continue
                         
                         # Store data for comprehensive report
                         bars_data[symbol] = bars
-                        if signals:
-                            signals_data[symbol] = signals
+
+                    try:
+                        # Import ReportGenerator here to avoid circular imports
+                        from src.core.reporting.report_generator import ReportGenerator
                         
-                        # Generate interactive chart with actual signals from backtest
-                        chart_path = plotter.plot_candlestick_interactive(
-                            bars=bars,
-                            signals=signals if True else None,
-                            symbol=symbol,
-                            title=f"{symbol} Backtest Analysis ({start_date.date()} to {end_date.date()})"
+                        report_gen = ReportGenerator(report_dir)
+                        report_path = report_gen.generate_full_trading_report(
+                            symbols=symbols,
+                            bars_data=bars_data,
+                            results=results,
+                            flags=args,
+                            report_title=f"Backtest Report: {start_date.date()} to {end_date.date()}"
                         )
-                        all_charts.append(chart_path)
                         
-                        logger.info(f"Chart created for {symbol}: {chart_path}")
+                        logger.info(f"Report generated: {report_path}")
+                        click.echo(f"Generated reports for {symbols}")
                         
                     except Exception as e:
-                        logger.error(f"Error creating chart for {symbol}: {e}")
-                
-                # Generate comprehensive reports if requested
-                try:
-                    # Import ReportGenerator here to avoid circular imports
-                    from src.core.reporting.report_generator import ReportGenerator
+                        import sys, traceback
+                        tb = traceback.extract_tb(sys.exc_info()[2])[-1]
+                        filename = tb.filename
+                        lineno = tb.lineno
+
+                        logger.error(f"Error generating reports: {e} (File: {filename}, line {lineno})")
                     
-                    report_gen = ReportGenerator(report_dir)
-                    report_path = report_gen.generate_full_trading_report(
-                        symbols=symbols,
-                        bars_data=bars_data,
-                        results=results,
-                        report_title=f"Backtest Report: {start_date.date()} to {end_date.date()}"
-                    )
-                    
-                    logger.info(f"Comprehensive report generated: {report_path}")
+                    # Update results with plotting information
+                    results['plotting'] = {
+                        'charts': all_charts,
+                        'report_directory': report_dir,
+                        'symbols_plotted': len([s for s in symbols if s in bars_data])
+                    }
                     
                 except Exception as e:
-                    import sys, traceback
-                    tb = traceback.extract_tb(sys.exc_info()[2])[-1]
-                    filename = tb.filename
-                    lineno = tb.lineno
-
-                    logger.error(f"Error generating comprehensive report: {e} (File: {filename}, line {lineno})")
-            
-                # Update results with plotting information
-                results['plotting'] = {
-                    'charts': all_charts,
-                    'report_directory': report_dir,
-                    'symbols_plotted': len([s for s in symbols if s in bars_data])
-                }
-
-                logger.info(f"Plotting completed. Generated {len(all_charts)} charts.")
-                
-            except Exception as e:
-                logger.error(f"Error in plotting integration: {e}")
-                # Don't fail the entire backtest if plotting fails
+                    logger.error(f"Error in plotting integration: {e}")
+                    # Don't fail the entire backtest if plotting fails
             
             return results
         
@@ -599,81 +606,94 @@ class TwoHuntersStrategy():
             raise
 
     def live(self, symbols):
+        """Fixed live trading with proper signal handling"""
+        import threading
+        
+        # Initialize graceful shutdown handler
+        killer = GracefulKiller()
+        
         threads = []
         for symbol in symbols:
             try:
+                from src.strategies.two_hunters import TwoHuntersStrategy  # Adjust import as needed
                 twohunters = TwoHuntersStrategy()
-                
                 twohunters.budget = self.budget
                 twohunters.symbol = symbol
-
+                
                 thread = threading.Thread(
-                    target=twohunters.run_live_for_symbol,
+                    target=self._run_live_with_killer, 
+                    args=(twohunters, killer),
+                    daemon=True  # Important: make threads daemon
                 )
-
                 threads.append(thread)
                 thread.start()
-
+                
             except Exception as e:
-                self.logger.error(f"Error craeting thread for {symbol}: {e}")
-
-    def run_live_for_symbol(self):
-        """
-        Live trading implementation with two states: sleeping and active trading
+                self.logger.error(f"Error creating thread for {symbol}: {e}")
         
-        States:
-        1. Sleeping State: Monitor system time, wait for trading hours
-        2. Live Trading State: Execute strategy during system hours
-        """
+        try:
+            # Wait for all threads with periodic checking for kill signal
+            while any(thread.is_alive() for thread in threads):
+                if killer.kill_now.is_set():
+                    self.logger.info("Shutdown signal received, stopping all threads...")
+                    break
+                goodtimes.sleep(0.1)  # Short sleep to allow signal checking
+                    
+        except KeyboardInterrupt:
+            # Fallback in case the signal handler doesn't work
+            self.logger.info("KeyboardInterrupt caught, initiating shutdown...")
+            killer.kill_now.set()
+        
+        # Wait for all threads to finish with timeout
+        self.logger.info("Waiting for threads to finish...")
+        for thread in threads:
+            thread.join(timeout=5.0)  # 5 second timeout
+            if thread.is_alive():
+                self.logger.warning(f"Thread {thread.name} did not terminate gracefully")
+        
+        self.logger.info("Live trading stopped successfully")
 
-        # Initialize components
-        mt5_conn = MT5Connection()
+
+    def run_live_for_symbol(self, killer):
+        """Fixed run_live_for_symbol with proper interrupt handling"""
         
         # Get system hours from config
-        start_time_str = settings.get("strategies.two_hunters.live_trading.system_hours.start")
-        end_time_str = settings.get("strategies.two_hunters.live_trading.system_hours.end")
-        
+        start_time_str = settings.get('strategies.two_hunters.live_trading.system_hours.start')
+        end_time_str = settings.get('strategies.two_hunters.live_trading.system_hours.end')
         start_time = datetime.strptime(start_time_str, "%H:%M").time()
         end_time = datetime.strptime(end_time_str, "%H:%M").time()
         
         # Work interval from config
-        work_interval = settings.get("strategies.two_hunters.live_trading.work_interval", 1)
+        work_interval = settings.get('strategies.two_hunters.live_trading.work_interval', 1)
         
         # Daily signals file path
         signals_dir = Path("reports/signals")
         signals_dir.mkdir(exist_ok=True)
         
-        self.logger.info("Live trading started")
+        self.logger.info(f"Live trading started for {self.symbol}")
         self.logger.info(f"System hours: {start_time_str} - {end_time_str}")
         
         try:
-            while True:
+            while not killer.kill_now.is_set():
                 current_time = datetime.now().time()
                 current_date = date.today()
                 
                 # Check if we're within system hours
                 if start_time <= current_time <= end_time:
-                    # LIVE TRADING STATE
-                    self.logger.info("Entering live trading state")
-                    
                     # Initialize daily signals file
                     daily_signals_file = signals_dir / f"signals_{current_date.strftime('%Y%m%d')}.json"
                     processed_signals = self._load_daily_signals(daily_signals_file)
                     
                     try:
-                        self._execute_live_trading_for_symbol(
-                            current_date,
-                            daily_signals_file,
-                            processed_signals
-                        )
-                    
+                        self._execute_live_trading_for_symbol(current_date, daily_signals_file, processed_signals, killer)
                     except Exception as e:
                         self.logger.error(f"Error trading {self.symbol}: {e}")
                         continue
                     
-                    # Sleep for work interval
-                    goodtimes.sleep(work_interval)
-                    
+                    # Sleep for work interval, but check for kill signal
+                    if not self._sleep_with_interrupt_check(work_interval, killer):
+                        break
+                        
                 else:
                     # SLEEPING STATE
                     if current_time < start_time:
@@ -685,17 +705,23 @@ class TwoHuntersStrategy():
                     
                     wait_seconds = max(60, wait_time.total_seconds())  # Minimum 1 minute wait
                     self.logger.info(f"Sleeping state - waiting {wait_seconds/60:.1f} minutes until trading hours")
-                    goodtimes.sleep(min(wait_seconds, 300))  # Max 5 minute sleep intervals
                     
-        except KeyboardInterrupt:
-            self.logger.info("Live trading interrupted by user")
+                    # Sleep in chunks to allow interrupt checking
+                    if not self._sleep_with_interrupt_check(min(wait_seconds, 300), killer):  # Max 5 minute chunks
+                        break
+                        
         except Exception as e:
-            self.logger.error(f"Critical error in live trading: {e}")
-            raise
+            self.logger.error(f"Critical error in live trading for {self.symbol}: {e}")
+        finally:
+            self.logger.info(f"Live trading stopped for {self.symbol}")
 
-    def _execute_live_trading_for_symbol(self, current_date: date, daily_signals_file: Path, processed_signals: dict):
+
+    def _execute_live_trading_for_symbol(self, current_date: date, daily_signals_file: Path, processed_signals: dict, killer):
         """Execute live trading logic for a specific symbol"""
         
+        if killer.kill_now.is_set():
+            return
+
         symbol = self.symbol
         signal_key = f"{symbol}_{current_date.strftime('%Y%m%d')}"
         rec_signal_key = f"{symbol}_{current_date.strftime('%Y%m%d')}_rec"
@@ -704,11 +730,9 @@ class TwoHuntersStrategy():
         data_fetcher = DataFetcher()
 
         # Fetch latest bars
-        end_time = datetime.now()
-        start_time = end_time - timedelta(hours=12)  # Get enough data for analysis
-        
+        start_time = datetime.combine(current_date, time(0, 0))
+        end_time = datetime.combine(current_date, time(23, 59))
         new_bars = data_fetcher.fetch_bars_from_mt5(start_time, end_time, symbol)
-        
         if not new_bars:
             self.logger.warning(f"No bars fetched for {symbol}")
             return
@@ -723,9 +747,9 @@ class TwoHuntersStrategy():
             signal = self._reconstruct_signal_from_dict(existing_signal)
         else:
             # Main signal generation
-            signal = self.attempt_signal(datetime.now())
+            signal = self.attempt_signal(start_time)
         
-        if signal and not signal.is_completed and not mt5_conn.order_is_open(signal):
+        if signal and signal.ticket is None:
             if mt5_conn.place_order(signal):
 
                 # Save signal to daily file
@@ -734,8 +758,8 @@ class TwoHuntersStrategy():
                 
                 self.logger.info(f"Signal generated and order placed for {symbol}: {signal}")
         
-        if signal and mt5_conn.order_is_open(signal):
-            risk_free_tiggered = signal.risk_free()
+        if signal and signal.ticket and signal.is_pending:
+            risk_free_tiggered = signal.risk_manager([bar for bar in new_bars if bar.timestamp > signal.timestamp])
 
             if risk_free_tiggered:
                 mt5_conn.update_order(signal)
@@ -746,7 +770,9 @@ class TwoHuntersStrategy():
                 
                 self.logger.info(f"Signal SL/TP updated for {symbol}: {signal}")
 
-        if signal and mt5_conn.check_order_status(signal):
+            mt5_conn.check_order_status(signal)
+        
+        if signal and signal.is_completed:
             # Save signal to daily file
             processed_signals[signal_key] = signal.to_dict()
             self._save_daily_signals(daily_signals_file, processed_signals)
@@ -760,9 +786,9 @@ class TwoHuntersStrategy():
                     rec_signal = self._reconstruct_signal_from_dict(existing_signal)
                 else:
                     # Reecovery signal generation
-                    rec_signal = self.attempt_signal(datetime().now(), signal)
+                    rec_signal = self.attempt_signal(start_time, signal)
 
-                if rec_signal and not rec_signal.is_completed and not mt5_conn.order_is_open(rec_signal):
+                if rec_signal and not rec_signal.ticket:
                     if mt5_conn.place_order(rec_signal):
 
                         # Save signal to daily file
@@ -771,8 +797,8 @@ class TwoHuntersStrategy():
                         
                         self.logger.info(f"Recovery Signal generated and order placed for {symbol}: {rec_signal}")
                 
-                if rec_signal and mt5_conn.order_is_open(rec_signal):
-                    risk_free_tiggered = rec_signal.risk_free()
+                if rec_signal and rec_signal.ticket and rec_signal.is_pending:
+                    risk_free_tiggered = rec_signal.risk_manager([bar for bar in new_bars if bar.timestamp > signal.timestamp])
 
                     if risk_free_tiggered:
                         mt5_conn.update_order(rec_signal)
@@ -783,7 +809,9 @@ class TwoHuntersStrategy():
                         
                         self.logger.info(f"Signal SL/TP updated for {symbol}: {signal}")
                     
-                if rec_signal and mt5_conn.check_order_status(rec_signal):
+                    mt5_conn.check_order_status(rec_signal)
+
+                if rec_signal and rec_signal.is_completed:
                     # Save signal to daily file
                     processed_signals[rec_signal_key] = rec_signal.to_dict()
                     self._save_daily_signals(daily_signals_file, processed_signals)
@@ -848,3 +876,33 @@ class TwoHuntersStrategy():
         
         return signal
 
+    def _run_live_with_killer(self, strategy_instance, killer):
+        """Wrapper to run live trading with kill signal monitoring"""
+        try:
+            strategy_instance.run_live_for_symbol(killer)
+        except Exception as e:
+            strategy_instance.logger.error(f"Error in live trading thread: {e}")
+
+    def _sleep_with_interrupt_check(self, duration, killer):
+        """Sleep for duration seconds while checking for interrupt signal"""
+        end_time = goodtimes.time() + duration
+        while goodtimes.time() < end_time:
+            if killer.kill_now.is_set():
+                return False  # Interrupted
+            goodtimes.sleep(min(0.5, end_time - goodtimes.time()))  # Check every 0.5 seconds
+        return True  # Completed sleep
+
+
+import signal
+class GracefulKiller:
+    """Handle keyboard interrupts gracefully for multithreaded applications"""
+    
+    def __init__(self):
+        self.kill_now = threading.Event()
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+    
+    def _handle_signal(self, signum, frame):
+        """Handle interrupt signals"""
+        print("\nShuting down...")
+        self.kill_now.set()

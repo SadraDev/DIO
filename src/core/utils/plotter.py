@@ -206,10 +206,10 @@ class TradingPlotter:
                 
                 # Validate file was created
                 if save_path.exists():
-                    self.logger.info(f"Interactive chart saved: {save_path}")
+                    self.logger.info(f"Chart saved: {save_path}")
                     return str(save_path)
                 else:
-                    self.logger.error(f"Failed to create interactive chart at {save_path}")
+                    self.logger.error(f"Failed to create chart at {save_path}")
                     return ""
                 
         except Exception as e:
@@ -296,8 +296,8 @@ class TradingPlotter:
             # PART 1: INITIAL SIGNAL AREAS (Rectangles)
             # These show the original risk/reward zones using INITIAL prices
             initial_entry = getattr(signal, 'initial_entry_price', signal.entry_price)
-            initial_sl = getattr(signal, 'initial_stoploss', signal.stop_loss)
-            initial_tp = getattr(signal, 'initial_takeprofit', signal.take_profit)
+            initial_sl = getattr(signal, 'initial_stop_loss', signal.stop_loss)
+            initial_tp = getattr(signal, 'initial_take_profit', signal.take_profit)
             
             # Add Initial Stop Loss rectangle (red) - based on INITIAL prices
             if initial_sl is not None:
@@ -495,7 +495,7 @@ class TradingPlotter:
             self.logger.warning("No completed signals for performance analysis")
             return ""
         
-        wins = sum(1 for s in completed_signals if hasattr(s, 'outcome') and s.outcome and s.outcome.value == "win")
+        wins = sum(1 for s in completed_signals if hasattr(s, 'gain') and s.gain and s.gain >= 0)
         total_profit = sum(s.gain for s in completed_signals if hasattr(s, 'gain') and s.gain)
         
         # Create single cumulative PL chart
@@ -524,7 +524,7 @@ class TradingPlotter:
                 ))
             
             fig.update_layout(
-                title=f"{symbol} Cumulative Performance",
+                title=f"{symbol} Performance",
                 height=400,
                 template='plotly_white',
                 xaxis_title="Date",
@@ -549,24 +549,20 @@ class TradingPlotter:
         table_rows = ""
         from src.core.models.budget import Budget
         budget = Budget()
+        commless_balance = 0
         
         for i, signal in enumerate(signals, 1):
-            outcome = signal.outcome.value.upper() if hasattr(signal, 'outcome') and signal.outcome else "NA"
-            gain = f"${round(signal.gain, 2)}" if getattr(signal, 'gain', None) not in [None, 0.0] else "$0.0" if getattr(signal, 'gain', None) == 0.0 else "NA"
-            lot_size = f"{signal.entry_lot:.2f}" if hasattr(signal, 'entry_lot') and signal.entry_lot else "NA"
+            gain = round(signal.gain, 2) if getattr(signal, 'gain', None) not in [None, 0.0] else 0.0 if getattr(signal, 'gain', None) == 0.0 else 0
+            commission = round(signal.commission, 2) if getattr(signal, 'commission') and signal.commission else 0
+            lot_size = f"{signal.entry_lot:.2f}" if hasattr(signal, 'entry_lot') and signal.entry_lot else 0
             
-            if outcome == "WIN":
-                pip_size = f"{signal.take_profit_pips:.2f}" if hasattr(signal, 'take_profit_pips') and signal.take_profit_pips else "NA"
-            else:
-                pip_size = f"{signal.stop_loss_pips:.2f}" if hasattr(signal, 'stop_loss_pips') and signal.stop_loss_pips else "NA"
-            
-            entry_price = f"{signal.entry_price:.5f}" if signal.entry_price else "NA"
-            stop_loss = f"{signal.stop_loss:.5f}" if hasattr(signal, 'stop_loss') and signal.stop_loss else "NA"
-            take_profit = f"{signal.take_profit:.5f}" if hasattr(signal, 'take_profit') and signal.take_profit else "NA"
-            timestamp = signal.timestamp.strftime("%Y-%m-%d %H:%M") if signal.timestamp else "NA"
+            stop_loss_pips = f"{signal.stop_loss_pips:.2f}" if hasattr(signal, 'stop_loss_pips') and signal.stop_loss_pips else 0
+            take_profit_pips = f"{signal.take_profit_pips:.2f}" if hasattr(signal, 'take_profit_pips') and signal.take_profit_pips else 0
+            timestamp = signal.timestamp.strftime("%Y-%m-%d %H:%M") if signal.timestamp else 0
             
             budget.apply_signal_gain(signal)
             current_balance = round(budget.current_balance)
+            commless_balance = int(current_balance) + int(commission)
             
             outcome_class = "win" if signal.gain > 0 else "loss" if signal.gain < 0 else "neutral"
             
@@ -575,17 +571,18 @@ class TradingPlotter:
                 <td>{i}</td>
                 <td>{timestamp}</td>
                 <td>{signal.action.value}</td>
-                <td>{entry_price}</td>
-                <td>{stop_loss}</td>
-                <td>{take_profit}</td>
                 <td class="{outcome_class}">{outcome_class.upper()}</td>
+                <td>{signal.sl_adjusted_count}</td>
                 <td>{lot_size}</td>
-                <td>{pip_size}</td>
-                <td class="{outcome_class}">{gain}</td>
-                <td><b>{current_balance}</b></td>
+                <td>{stop_loss_pips}</td>
+                <td>{take_profit_pips}</td>
+                <td>{commission}$</td>
+                <td class="{outcome_class}">{gain}$</td>
+                <td><b>{current_balance}$</b></td>
+                <td><b>{commless_balance}$</b></td>
             </tr>
             """
-        
+
         html_template = f"""
         <!DOCTYPE html>
         <html>
@@ -656,34 +653,35 @@ class TradingPlotter:
         </head>
         <body>
             <div class="container">
-                <h1>{symbol} Performance Report</h1>
+                <h1>{symbol} Analysis</h1>
                 
                 <div class="summary">
-                    <h2>Total P&L: ${total_profit:.2f}</h2>
+                    <h2>Total Profit: ${total_profit:.2f}</h2>
                     <p>Wins: {wins} / Total Trades: {len(signals)} | Win Rate: {(wins/len(signals)*100):.1f}%</p>
                 </div>
                 
                 <div class="chart-section">
-                    <h2>Cumulative Performance</h2>
+                    <h2>Performance</h2>
                     {plot_div}
                 </div>
                 
                 <div class="signals-section">
-                    <h2>Trading Signals Details</h2>
+                    <h2>Signal Details</h2>
                     <table>
                         <thead>
                             <tr>
                                 <th>#</th>
                                 <th>Date/Time</th>
                                 <th>Action</th>
-                                <th>Entry Price</th>
-                                <th>Stop Loss</th>
-                                <th>Take Profit</th>
                                 <th>Outcome</th>
+                                <th>SL Adj</th>
                                 <th>Lot Size</th>
-                                <th>Pip Gain</th>
+                                <th>Stop Loss Pips</th>
+                                <th>Take Profit Pips</th>
+                                <th>Commission</th>
                                 <th>Profit</th>
                                 <th>Curent Balance</th>
+                                <th>C-L Balance</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -707,14 +705,13 @@ class TradingPlotter:
         
         if save_path is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"symbol_comparison_{timestamp}.html"
-            save_path = self.report_dir / "interactive" / filename
+            filepath = f"full_report_{timestamp}"
+            save_path = self.report_dir / filepath / "comparison.html"
         
         # Ensure directory exists
         save_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Calculate comprehensive metrics for each symbol
-        comparison_data = {}
         all_signals = []  # For joint analysis
         individual_stats = {}
         
@@ -725,11 +722,14 @@ class TradingPlotter:
             completed = [s for s in signals if hasattr(s, 'is_completed') and s.is_completed]
             
             if completed:
-                wins = [s for s in completed if hasattr(s, 'outcome') and s.outcome and s.outcome.value == "win"]
-                losses = [s for s in completed if hasattr(s, 'outcome') and s.outcome and s.outcome.value == "loss"]
+                # Implement draw down
+                wins = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain >= 0]
+                losses = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain < 0]
                 win_gains = [s.gain for s in wins if hasattr(s, 'gain') and s.gain]
                 loss_gains = [s.gain for s in losses if hasattr(s, 'gain') and s.gain]
                 total_profit = sum(s.gain for s in completed if hasattr(s, 'gain') and s.gain)
+                total_commission = sum(s.commission for s in completed if hasattr(s, 'commission') and s.commission)
+                total_lot_sizes = sum(s.entry_lot for s in completed if hasattr(s, 'entry_lot') and s.entry_lot)
                 
                 # Individual symbol statistics
                 individual_stats[symbol] = {
@@ -738,29 +738,19 @@ class TradingPlotter:
                     'losses': len(losses),
                     'win_rate': (len(wins) / len(completed)) * 100,
                     'total_profit': total_profit,
+                    'total_commission': total_commission,
                     'avg_profit': total_profit / len(completed),
+                    'avg_lot_size': round(total_lot_sizes / len(completed), 2),
                     'max_win': max(win_gains) if win_gains else 0,
                     'max_loss': min(loss_gains) if loss_gains else 0,  # Most negative
                     'avg_win': sum(win_gains) / len(win_gains) if win_gains else 0,
                     'avg_loss': sum(loss_gains) / len(loss_gains) if loss_gains else 0
                 }
-               
-                # Add to overall data for compatibility
-                comparison_data[symbol] = {
-                    'total_trades': len(completed),
-                    'wins': len(wins),
-                    'win_rate': (len(wins) / len(completed)) * 100,
-                    'total_profit': total_profit,
-                    'avg_profit': total_profit / len(completed)
-                }
 
                 # Add to joint analysis
                 all_signals.extend(completed)
         
-        if not comparison_data:
-            self.logger.warning("No data for symbol comparison")
-            return ""
-        
+
         # Calculate joint/overall statistics
         joint_stats = self.calculate_joint_statistics(all_signals)
         
@@ -770,7 +760,7 @@ class TradingPlotter:
             charts_html = self.create_cumulative_chart_only(joint_stats)
         
         # Generate simplified HTML
-        html_content = self.generate_simplified_comparison_html(charts_html, individual_stats, joint_stats, comparison_data)
+        html_content = self.generate_simplified_comparison_html(charts_html, individual_stats, joint_stats)
         
         with open(save_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
@@ -784,8 +774,8 @@ class TradingPlotter:
         if not all_signals:
             return {}
         
-        wins = [s for s in all_signals if hasattr(s, 'outcome') and s.outcome and s.outcome.value == "win"]
-        losses = [s for s in all_signals if hasattr(s, 'outcome') and s.outcome and s.outcome.value == "loss"]
+        wins = [s for s in all_signals if hasattr(s, 'gain') and s.gain and s.gain >= 0]
+        losses = [s for s in all_signals if hasattr(s, 'gain') and s.gain and s.gain < 0]
         win_gains = [s.gain for s in wins if hasattr(s, 'gain') and s.gain]
         loss_gains = [s.gain for s in losses if hasattr(s, 'gain') and s.gain]
         total_profit = sum(s.gain for s in all_signals if hasattr(s, 'gain') and s.gain)
@@ -820,7 +810,7 @@ class TradingPlotter:
             )
             charts_html = f"""
             <div class="chart-section">
-                <h3>Joint Cumulative Performance - All Signals</h3>
+                <h3>Joint Performance - All Signals</h3>
                 <div class="chart-container">
                     {chart_div}
                 </div>
@@ -915,7 +905,7 @@ class TradingPlotter:
                 'xanchor': 'center'
             },
             xaxis_title="Date",
-            yaxis_title="Cumulative P&L ($)",
+            yaxis_title="Cumulative Profit ($)",
             autosize=True,
             height=None,
             width=None,
@@ -942,7 +932,7 @@ class TradingPlotter:
         
         return fig
 
-    def generate_simplified_comparison_html(self, charts_html: str, individual_stats: Dict, joint_stats: Dict, comparison_data: Dict) -> str:
+    def generate_simplified_comparison_html(self, charts_html: str, individual_stats: Dict, joint_stats: Dict) -> str:
         """Generate simplified HTML report with only cumulative chart"""
         
         # Create detailed statistics tables
@@ -1067,9 +1057,6 @@ class TradingPlotter:
         if not joint_stats:
             return ""
         
-        expectancy = (joint_stats.get('avg_win', 0) * joint_stats.get('overall_win_rate', 0) / 100) + \
-                    (joint_stats.get('avg_loss', 0) * (100 - joint_stats.get('overall_win_rate', 0)) / 100)
-        
         return f"""
         <div class="chart-section">
             <h3>Overall Performance Summary</h3>
@@ -1084,7 +1071,7 @@ class TradingPlotter:
                 </div>
                 <div style="background: rgba(231, 76, 60, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e74c3c;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('total_profit', 0):.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Total P&L</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Total Profit</div>
                 </div>
                 <div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #9b59b6;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('avg_profit_per_trade', 0):.2f}</div>
@@ -1098,14 +1085,6 @@ class TradingPlotter:
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${abs(joint_stats.get('max_loss', 0)):.2f}</div>
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Max Single Loss</div>
                 </div>
-                <div style="background: rgba(26, 188, 156, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #1abc9c;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('profit_factor', 0):.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Profit Factor</div>
-                </div>
-                <div style="background: rgba(241, 196, 15, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #f1c40f;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${expectancy:.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Expectancy per Trade</div>
-                </div>
             </div>
         </div>
         """
@@ -1117,21 +1096,17 @@ class TradingPlotter:
         for symbol, stats in individual_stats.items():
             profit_class = "win" if stats['total_profit'] > 0 else "loss" if stats['total_profit'] < 0 else "neutral"
             win_rate_class = "win" if stats['win_rate'] >= 60 else "neutral" if stats['win_rate'] >= 40 else "loss"
-            
+            avg_lot_size = individual_stats[symbol]['avg_lot_size']
+
             table_rows += f"""
             <tr>
                 <td><strong>{symbol}</strong></td>
                 <td>{stats['total_trades']}</td>
-                <td>{stats['wins']}</td>
-                <td>{stats['losses']}</td>
-                <td class="{win_rate_class}">{stats['win_rate']:.1f}%</td>
+                <td><b>{stats['win_rate']:.1f}%</b></td>
                 <td class="{profit_class}">${stats['total_profit']:.2f}</td>
+                <td>${stats['total_commission']:.2f}</td>
                 <td>${stats['avg_profit']:.2f}</td>
-                <td class="win">${stats['max_win']:.2f}</td>
-                <td class="loss">${abs(stats['max_loss']):.2f}</td>
-                <td class="win">${stats['avg_win']:.2f}</td>
-                <td class="loss">${abs(stats['avg_loss']):.2f}</td>
-                <td>{stats.get('profit_factor', 0):.2f}</td>
+                <td>{avg_lot_size}</td>
             </tr>
             """
         
@@ -1141,16 +1116,11 @@ class TradingPlotter:
                 <tr>
                     <th>Symbol</th>
                     <th>Total Trades</th>
-                    <th>Wins</th>
-                    <th>Losses</th>
                     <th>Win Rate%</th>
-                    <th>Total P&L</th>
-                    <th>Avg P&L/Trade</th>
-                    <th>Max Win</th>
-                    <th>Max Loss</th>
-                    <th>Avg Win</th>
-                    <th>Avg Loss</th>
-                    <th>Profit Factor</th>
+                    <th>Total Profit</th>
+                    <th>Total Commission</th>
+                    <th>Avg Profit/Trade</th>
+                    <th>Avg Lots Size</th>
                 </tr>
             </thead>
             <tbody>

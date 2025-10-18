@@ -109,35 +109,12 @@ class MT5Connection:
             log_connection_event("account_info_error", "error", error=str(e))
             return None
     
-    def order_is_open(self, symbol: str) -> Optional[List[Bar]]:
-        """Fetch the most recent bars for a symbol"""
-        if not self.ensure_connection():
-            return None
-        
-        try:
-            orders = mt5.orders_get(symbol=symbol)
-            if orders is None:
-                self.logger.info("No open orders")
-                return False
-            else:
-                self.logger.warning(f"Order open for {symbol}")
-                return True
-            
-        except Exception as e:
-            log_order_event("failed to get orders", symbol, {e})
-            return None
-    
     def place_order(self, signal: Signal) -> bool:
         """Place a trading order based on signal"""
         if not self.ensure_connection():
             return False
         
         try:
-            selected = mt5.symbol_select(signal.symbol, True)
-            if not selected:
-                log_order_event("symbol_select_failed", signal.symbol, signal.action.value, error="Symbol not selected in Market Watch")
-                return False
-            
             # Get current price
             tick = mt5.symbol_info_tick(signal.symbol)
             if not tick:
@@ -153,6 +130,14 @@ class MT5Connection:
                 order_type = mt5.ORDER_TYPE_BUY
                 price = tick.ask
             
+            if signal.is_buy:
+                stop_loss = signal.stop_loss if signal.stop_loss < price else price - 0.00001
+                take_profit =  signal.take_profit if signal.take_profit > price else price + 0.00001
+
+            if signal.is_sell:
+                stop_loss = signal.stop_loss if signal.stop_loss > price else price + 0.00001
+                take_profit =  signal.take_profit if signal.take_profit < price else price - 0.00001
+
             # Build order request
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -160,8 +145,8 @@ class MT5Connection:
                 "volume": signal.entry_lot,
                 "type": order_type,
                 "price": price,
-                "sl": signal.stop_loss,
-                "tp": signal.take_profit,
+                "sl": stop_loss,
+                "tp": take_profit,
                 "deviation": self.deviation,
                 "magic": self.magic_number,
                 "comment": f"From_TwoHunters",
@@ -175,8 +160,8 @@ class MT5Connection:
                 signal.entry_price = price
                 
                 log_order_event("order_placed", signal.symbol, signal.action.value,
-                              ticket=result.order, price=price, volume=signal.entry_lot,
-                              sl=signal.stop_loss, tp=signal.take_profit)
+                              ticket=signal.ticket, price=price, volume=signal.entry_lot,
+                              sl=stop_loss, tp=take_profit)
                 return True
             else:
                 log_order_event("order_failed", signal.symbol, signal.action.value,
@@ -196,16 +181,28 @@ class MT5Connection:
         try:
             # Check if position still exists
             position = mt5.positions_get(ticket=signal.ticket)
+            tick = mt5.symbol_info_tick(signal.symbol)
             if not position:
                 self.logger.warning(f"Position {signal.ticket} not found for update")
                 return False
-            
+
+            if signal.is_buy:
+                price = tick.ask
+                stop_loss = signal.stop_loss if signal.stop_loss < price else price - 0.00001
+                take_profit =  signal.take_profit if signal.take_profit > price else price + 0.00001
+
+            if signal.is_sell:
+                price = tick.bid
+                stop_loss = signal.stop_loss if signal.stop_loss > price else price + 0.00001
+                take_profit =  signal.take_profit if signal.take_profit < price else price - 0.00001
+
+
             # Build update request
             request = {
                 "action": mt5.TRADE_ACTION_SLTP,
                 "position": signal.ticket,
-                "sl": signal.stop_loss,
-                "tp": signal.take_profit,
+                "sl": stop_loss,
+                "tp": take_profit,
                 "magic": self.magic_number,
                 "comment": "SL/TP Update",
             }
@@ -214,8 +211,8 @@ class MT5Connection:
             
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 log_order_event("order_updated", signal.symbol, signal.action.value,
-                              ticket=signal.ticket, new_sl=signal.stop_loss,
-                              new_tp=signal.take_profit)
+                              ticket=signal.ticket, new_sl=stop_loss,
+                              new_tp=take_profit)
                 return True
             else:
                 log_order_event("update_failed", signal.symbol, signal.action.value,
@@ -234,8 +231,8 @@ class MT5Connection:
         
         try:
             # Look for deals in recent history
-            from_time = signal.timestamp
-            to_time = from_time + timedelta(days=2)
+            from_time = signal.timestamp + timedelta(minutes=10)
+            to_time = from_time - timedelta(days=2)
             
             deals = mt5.history_deals_get(from_time, to_time)
             if not deals:
@@ -258,7 +255,8 @@ class MT5Connection:
                     hasattr(deal, "profit")):
                     
                     signal.gain = deal.profit
-                    if not signal.lil_boy:
+                    signal.commission = deal.commission
+                    if not signal.emergency:
                         signal.outcome = SignalOutcome.WIN if deal.profit >= 0 else SignalOutcome.LOSS
                     else:
                         signal.outcome = SignalOutcome.LOSS

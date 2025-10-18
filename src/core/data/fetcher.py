@@ -74,7 +74,7 @@ class DataFetcher:
             # Pull raw ticks for the interval (both info and trade ticks)
             ticks = mt5.copy_ticks_range(symbol, start_dt, end_dt, mt5.COPY_TICKS_ALL)
             if ticks is None or len(ticks) == 0:
-                self.logger.warning(f"No tick data available for {symbol} in range.")
+                self.logger.info(f"No tick data available for {symbol} in range {start_dt.date()}-{end_dt.date()}.")
                 return []
 
             self.logger.debug(f"Retrieved {len(ticks)} ticks for {symbol}")

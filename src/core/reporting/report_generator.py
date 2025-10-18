@@ -20,7 +20,8 @@ class ReportGenerator:
         self, 
         symbols: List[str], 
         bars_data: Dict[str, List[Bar]], 
-        results: Dict[str, List[Signal]], 
+        results: Dict[str, List[Signal]],
+        flags: Dict[str, bool],
         report_title: str = "Trading Analysis Report"
     ) -> str:
         """Generate comprehensive trading report with all components"""
@@ -28,41 +29,43 @@ class ReportGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         report_dir = self.report_dir / f"full_report_{timestamp}"
         report_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate individual symbol charts - FIXED: Save to timestamped directory
         chart_paths = []
-        for symbol in symbols:
-            if symbol in bars_data:
-                bars = bars_data[symbol]
-                signals = results.get(symbol, [])
-                
-                # FIXED: Save charts in the timestamped directory instead of generating duplicates
-                chart_path = self.plotter.plot_candlestick_interactive(
-                    bars=bars,
-                    signals=signals,
-                    symbol=symbol,
-                    save_path=report_dir / f"{symbol}_chart.html"  # Specific path in timestamped directory
-                )
-                chart_paths.append(chart_path)
-        
-        # Generate performance reports
         performance_paths = []
-        for symbol in symbols:
-            if symbol in results and results[symbol]:
-                perf_path = self.plotter.create_performance_report(
-                    signals=results[symbol],
-                    symbol=symbol,
-                    save_path=report_dir / f"{symbol}_performance.html"  # Specific path
+        comparison_path = []
+
+        if not flags['no_plots']:
+            # Generate individual symbol charts
+            for symbol in symbols:
+                if symbol in bars_data:
+                    bars = bars_data[symbol]
+                    signals = results.get(symbol, [])
+                    
+                    chart_path = self.plotter.plot_candlestick_interactive(
+                        bars=bars,
+                        signals=signals if not flags['no_signals'] else None,
+                        symbol=symbol,
+                        show_mbox=not flags['no_mbox'],
+                        save_path=report_dir / f"{symbol}_chart.html"
+                    )
+                    chart_paths.append(chart_path)
+
+        if not flags['no_reports']:
+            # Generate performance reports
+            for symbol in symbols:
+                if symbol in results and results[symbol]:
+                    perf_path = self.plotter.create_performance_report(
+                        signals=results[symbol],
+                        symbol=symbol,
+                        save_path=report_dir / f"{symbol}_performance.html"
+                    )
+                    performance_paths.append(perf_path)
+            
+            # Generate symbol comparison report
+            if len(symbols) > 1:
+                comparison_path = self.plotter.create_symbol_comparison_report(
+                    results=results,
+                    save_path=report_dir / "comparison.html"
                 )
-                performance_paths.append(perf_path)
-        
-        # Generate symbol comparison report
-        comparison_path = None
-        if len(symbols) > 1:
-            comparison_path = self.plotter.create_symbol_comparison_report(
-                results=results,
-                save_path=report_dir / "comparison.html"  # Specific path
-            )
         
         # Generate index.html with navigation
         index_path = self.generate_index_page(
@@ -74,7 +77,10 @@ class ReportGenerator:
             report_title
         )
         
-        self.logger.info(f"Full trading report generated: {index_path}")
+        if not flags['no_plots'] or not flags['no_reports']:
+            self.logger.info(f"Reports generated: {index_path}")
+        else:
+            self.logger.info(f"Outputs logged.")
         return str(index_path)
     
     def generate_index_page(
@@ -183,33 +189,35 @@ class ReportGenerator:
         """
         
         # Add chart links
-        for i, chart_path in enumerate(chart_paths):
-            symbol = symbols[i] if i < len(symbols) else f"Chart {i+1}"
-            chart_name = Path(chart_path).name
-            html_content += f"""
-                <div class="nav-card">
-                    <a href="{chart_name}" target="_blank">{symbol} Chart</a>
-                </div>
+        if chart_paths:
+            for i, chart_path in enumerate(chart_paths):
+                symbol = symbols[i] if i < len(symbols) else f"Chart {i+1}"
+                chart_name = Path(chart_path).name
+                html_content += f"""
+                    <div class="nav-card">
+                        <a href="{chart_name}" target="_blank">{symbol} Chart</a>
+                    </div>
+                """
+            
+            html_content += """
+                    </div>
+                    
+                    <div class="section-title">Performance Reports</div>
+                    <div class="nav-grid">
             """
-        
-        html_content += """
-                </div>
-                
-                <div class="section-title">Performance Reports</div>
-                <div class="nav-grid">
-        """
         
         # Add performance report links
-        for i, perf_path in enumerate(performance_paths):
-            symbol = symbols[i] if i < len(symbols) else f"Performance {i+1}"
-            perf_name = Path(perf_path).name
-            html_content += f"""
-                <div class="nav-card">
-                    <a href="{perf_name}" target="_blank">{symbol} Performance</a>
-                </div>
-            """
-        
-        html_content += "</div>"
+        if performance_paths:
+            for i, perf_path in enumerate(performance_paths):
+                symbol = symbols[i] if i < len(symbols) else f"Performance {i+1}"
+                perf_name = Path(perf_path).name
+                html_content += f"""
+                    <div class="nav-card">
+                        <a href="{perf_name}" target="_blank">{symbol} Performance</a>
+                    </div>
+                """
+            
+            html_content += "</div>"
         
         # Add comparison report if available
         if comparison_path:
@@ -223,11 +231,11 @@ class ReportGenerator:
                 </div>
             """
         
-        html_content += """
-            </div>
-        </body>
-        </html>
-        """
+            html_content += """
+                </div>
+            </body>
+            </html>
+            """
         
         with open(index_path, 'w', encoding='utf-8') as f:
             f.write(html_content)

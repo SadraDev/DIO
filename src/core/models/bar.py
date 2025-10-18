@@ -56,7 +56,7 @@ class Bar:
             body_to_range_ratio = self.body / self.range
             
             # Weak candle if body is less than 1/3 of total range
-            if body_to_range_ratio < 0.33:
+            if body_to_range_ratio < 0.34:
                 self.is_weak = True
                 
                 # Determine wick dominance for weak candles

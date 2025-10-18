@@ -108,7 +108,7 @@ class Budget:
         """Calculate potential reward based on risk and reward ratio"""
         if reward_ratio <= 0:
             raise ValueError("Reward ratio must be non-negative")
-        return self.risk_amount * reward_ratio
+        return self.risk_amount() * reward_ratio
     
     # ENHANCED POSITION SIZING - NOW USES RISK_AMOUNT DIRECTLY
     def calculate_pip_value(self, symbol: str) -> float:

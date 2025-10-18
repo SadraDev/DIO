@@ -18,6 +18,7 @@ account:
 
 # Trading Configuration
 trading:
+  commission: 0.00007
   symbols: ["EURUSD.", "GBPUSD."]
   max_signals_per_symbol: 2
   risk:
@@ -100,8 +101,8 @@ strategies:
       monitoring_port: 8765
       emergency_stop_loss_percent: 0.10
       system_hours:
-        start: "18:30"
-        end: "20:30"
+        start: "09:30"
+        end: "13:30"
       # system_hours:
       #   start: "02:00"
       #   end: "13:30"

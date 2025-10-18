@@ -53,27 +53,25 @@ def two_hunters_cli(ctx, config, verbose, quiet):
               help='Initial balance for backtest')
 @click.option('--risk', '-r', type=float, default=None,
               help='Risk percentage per trade (e.g., 0.01 for 1%)')
-@click.option('--save-results', is_flag=True, default=True,
-              help='Save backtest results to file')
+@click.option('--no-risk-manager', is_flag=True, default=False,
+              help='Show trading signals on charts')
 @click.option('--output-dir', type=click.Path(), default=None,
               help='Output directory for results')
-# NEW PLOTTING OPTIONS INTEGRATED INTO BACKTEST
-@click.option('--show-signals', is_flag=True, default=True,
+
+# PLOTTING OPTIONS 
+@click.option('--no-signals', is_flag=True, default=False,
               help='Show trading signals on charts')
-@click.option('--show-sessions', is_flag=True, default=True,
-              help='Highlight trading sessions on charts')
-@click.option('--show-choch', is_flag=True, default=True,
-              help='Show CHoCH detection lines on charts')
-@click.option('--interactive', is_flag=True, default=True,
-              help='Generate interactive charts (vs static)')
-@click.option('--create-report', is_flag=True, default=True,
-              help='Generate comprehensive trading report')
+@click.option('--no-mbox', is_flag=True, default=False,
+              help='Highlight trading mbox on charts')
+@click.option('--no-reports', is_flag=True, default=False,
+              help='Skip report generation (backtest only)')
 @click.option('--no-plots', is_flag=True, default=False,
               help='Skip chart generation (backtest only)')
 @click.pass_context
-def backtest(ctx, symbol, start_date, end_date, balance, risk, 
-             save_results, output_dir, show_signals, show_sessions, 
-             show_choch, interactive, create_report, no_plots):
+def backtest(ctx, symbol, start_date, end_date, balance,
+             risk, no_risk_manager, output_dir, no_signals,
+             no_mbox, no_reports, no_plots
+             ):
     """Run backtesting on historical data with integrated plotting"""
     from src.strategies.two_hunters import TwoHuntersStrategy
     twohunters = TwoHuntersStrategy()
@@ -95,41 +93,36 @@ def backtest(ctx, symbol, start_date, end_date, balance, risk,
     if not ctx.obj['quiet']:
         click.echo(f"Starting backtest with {', '.join(symbols)}")
         click.echo(f"Period: {start_date.date()} to {end_date.date()}")
-        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%}")
-        
-        if not no_plots:
-            click.echo(f"Charts: {'Yes' if interactive else 'Static'}")
-            click.echo(f"Reports: {'Yes' if create_report else 'No'}")
-        else:
-            click.echo(f"Charts: Disabled")
+        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%} | Risk Manager: {'Enabled' if not no_risk_manager else 'Disabled'}")
+        click.echo(f"Charts: {'Enabled' if not no_plots else 'Disabled'}")
+        click.echo(f"   Show Mbox: {'Enabled' if not no_mbox else 'Disabled'}") if not no_plots else None
+        click.echo(f"   Show Signals: {'Enabled' if not no_signals else 'Disabled'}") if not no_plots else None
+        click.echo(f"Reports: {'Enabled' if not no_reports else 'Disabled'}")
+    
     
     try:
+        twohunters.budget.initial_balance = balance
+        twohunters.budget.current_balance = balance
+        twohunters.budget.initial_risk_percent = risk
+        twohunters.budget.current_risk_percent = risk
+
         results = twohunters.backtest(
             symbols=symbols,
             start_date=start_date,
             end_date=end_date,
-            initial_balance=balance,
-            risk_percent=risk,
-            save_results=save_results,
             output_dir=output_dir,
+            no_risk_manager=no_risk_manager,
             verbose=ctx.obj['verbose'],
             # Plotting parameters (only if not disabled)
-            show_signals=show_signals and not no_plots,
-            show_sessions=show_sessions and not no_plots,
-            show_choch=show_choch and not no_plots,
-            interactive=interactive and not no_plots,
-            create_report=create_report and not no_plots
+            no_reports=no_reports,
+            no_plots=no_plots,
+            no_signals=no_signals,
+            no_mbox=no_mbox,
         )
         
         if not ctx.obj['quiet']:
             click.echo("Backtest completed successfully")
-            
-            # Show plotting results if enabled
-            if not no_plots and 'plotting' in results:
-                plotting_info = results['plotting']
-                click.echo(f"Generated {len(plotting_info['charts'])} charts")
-                click.echo(f"Reports saved to: {plotting_info['report_directory']}")
-                
+
     except Exception as e:
         import sys, traceback
         tb = traceback.extract_tb(sys.exc_info()[2])[-1]
@@ -190,10 +183,23 @@ def live(ctx, symbol, risk):
     twohunters.budget.initial_balance = balance
     twohunters.budget.initial_risk_percent
     
+    import signal
+    def signal_handler(signum, frame):
+            """Handle Ctrl+C gracefully"""
+            print("\n=Shuting down...")
+            print("live trading stoped.")
+            sys.exit(0)
+        
+        # Register signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
         twohunters.live(symbols)
+    except KeyboardInterrupt:
+        print("\nLive trading interrupted by user")
     except Exception as e:
-        click.echo("Error running live.")
-
+        click.echo(f"Error running live: {e}")
+    
 if __name__ == '__main__':
     two_hunters_cli()
