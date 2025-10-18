@@ -49,9 +49,9 @@ class TwoHuntersStrategy():
         self.symbol: str = None
 
         # Strategy state
-        self.signal_counter = defaultdict(int)  # Signals per symbol per day
-        self.all_bars = []  # Store recent bars for analysis
-        self.fake_chochs = []  # Store detected fake CHoCH patterns
+        self.signal_counter = defaultdict(int)
+        self.all_bars = []
+        self.fake_chochs = []
         
         # SESSION HOURS - When trading analysis happens
         self.mbox_time = self._get_mbox_time()
@@ -287,7 +287,7 @@ class TwoHuntersStrategy():
 
         # Get required bars
         mbox_bars = self.get_mbox_bars(target_date)
-        session_bars = self.get_session_bars(target_date)[:-1] # exclude live bar
+        session_bars = self.get_session_bars(target_date)
         
         if not mbox_bars or len(session_bars) < 5:
             self.logger.debug(f"Insufficient bars: MBox={len(mbox_bars)}, Session={len(session_bars)}")
@@ -355,23 +355,23 @@ class TwoHuntersStrategy():
         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
         signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
 
-        if signal.entry_lot > signal.stop_loss_pips:
-            signal.emergency = True
-            commission_amount = settings.get("trading.commission")
-            _multiplier = (1.5, 2.5) if signal.is_main else (2.5, 4.0)
-            _ratio = abs(signal.initial_entry_price - signal.initial_stop_loss)
+        # if signal.entry_lot > signal.stop_loss_pips:
+        #     signal.emergency = True
+        #     commission_amount = settings.get("trading.commission")
+        #     _multiplier = (1.5, 2.5) if signal.is_main else (2.5, 4.0)
+        #     _ratio = abs(signal.initial_entry_price - signal.initial_stop_loss)
 
-            if signal.is_sell:
-                signal.stop_loss   = signal.initial_entry_price + (_multiplier[0] * _ratio) + commission_amount
-                signal.take_profit = signal.initial_entry_price - (_multiplier[1] * _ratio) - commission_amount
+        #     if signal.is_sell:
+        #         signal.stop_loss   = signal.initial_entry_price + (_multiplier[0] * _ratio) + commission_amount
+        #         signal.take_profit = signal.initial_entry_price - (_multiplier[1] * _ratio) - commission_amount
 
-            if signal.is_buy:
-                signal.stop_loss   = signal.initial_entry_price - (_multiplier[0] * _ratio) - commission_amount
-                signal.take_profit = signal.initial_entry_price + (_multiplier[1] * _ratio) + commission_amount
+        #     if signal.is_buy:
+        #         signal.stop_loss   = signal.initial_entry_price - (_multiplier[0] * _ratio) - commission_amount
+        #         signal.take_profit = signal.initial_entry_price + (_multiplier[1] * _ratio) + commission_amount
 
-            signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
-            signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
-            signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
+        #     signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
+        #     signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+        #     signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
 
         # Log signal generation
         log_signal_event(
@@ -571,10 +571,10 @@ class TwoHuntersStrategy():
                         report_gen = ReportGenerator(report_dir)
                         report_path = report_gen.generate_full_trading_report(
                             symbols=symbols,
-                            bars_data=bars_data,
+                            barsdata=bars_data,
                             results=results,
                             flags=args,
-                            report_title=f"Backtest Report: {start_date.date()} to {end_date.date()}"
+                            reporttitle=f"Backtest Report: {start_date.date()} to {end_date.date()}"
                         )
                         
                         logger.info(f"Report generated: {report_path}")

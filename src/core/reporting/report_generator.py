@@ -17,71 +17,50 @@ class ReportGenerator:
         self.logger = TradingLogger.get_main_logger()
 
     def generate_full_trading_report(
-        self, 
-        symbols: List[str], 
-        bars_data: Dict[str, List[Bar]], 
+        self,
+        symbols: List[str],
+        barsdata: Dict[str, List[Bar]],
         results: Dict[str, List[Signal]],
         flags: Dict[str, bool],
-        report_title: str = "Trading Analysis Report"
+        reporttitle: str = "Trading Analysis Report"
     ) -> str:
-        """Generate comprehensive trading report with all components"""
-        
+        """Generate comprehensive trading report with symbol-separated charts"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_dir = self.report_dir / f"full_report_{timestamp}"
-        report_dir.mkdir(parents=True, exist_ok=True)
-        chart_paths = []
-        performance_paths = []
-        comparison_path = []
-
-        if not flags['no_plots']:
-            # Generate individual symbol charts
-            for symbol in symbols:
-                if symbol in bars_data:
-                    bars = bars_data[symbol]
-                    signals = results.get(symbol, [])
-                    
-                    chart_path = self.plotter.plot_candlestick_interactive(
-                        bars=bars,
-                        signals=signals if not flags['no_signals'] else None,
-                        symbol=symbol,
-                        show_mbox=not flags['no_mbox'],
-                        save_path=report_dir / f"{symbol}_chart.html"
-                    )
-                    chart_paths.append(chart_path)
-
-        if not flags['no_reports']:
-            # Generate performance reports
-            for symbol in symbols:
-                if symbol in results and results[symbol]:
-                    perf_path = self.plotter.create_performance_report(
-                        signals=results[symbol],
-                        symbol=symbol,
-                        save_path=report_dir / f"{symbol}_performance.html"
-                    )
-                    performance_paths.append(perf_path)
-            
-            # Generate symbol comparison report
-            if len(symbols) > 1:
-                comparison_path = self.plotter.create_symbol_comparison_report(
-                    results=results,
-                    save_path=report_dir / "comparison.html"
-                )
+        reportdir = self.report_dir / f"{timestamp}"
+        reportdir.mkdir(parents=True, exist_ok=True)
         
-        # Generate index.html with navigation
-        index_path = self.generate_index_page(
-            report_dir, 
-            chart_paths, 
-            performance_paths, 
-            comparison_path,
-            symbols,
-            report_title
-        )
+        self.logger.info(f"Generating report in: {reportdir}")
         
-        if not flags['no_plots'] or not flags['no_reports']:
-            self.logger.info(f"Reports generated: {index_path}")
+        # Generate charts organized by symbol
+        chartpaths = {}
+        if not flags.get("noplots"):
+            self.logger.info("Generating symbol-separated monthly charts...")
+            chartpaths = self.plotter.generate_monthly_charts(
+                barsdata=barsdata,
+                results=results,
+                reportdir=reportdir,  # Pass report dir, not charts dir
+                showmbox=not flags.get("nombox")
+            )
+            total_charts = sum(len(months) for months in chartpaths.values())
+            self.logger.info(f"Generated {total_charts} charts across {len(chartpaths)} symbols")
+        
+        # Generate main report
+        comparisonpath = None
+        if len(symbols) >= 1 and not flags.get("noreports"):
+            self.logger.info("Generating main report...")
+            comparisonpath = self.plotter.create_symbol_comparison_report(
+                results=results,
+                chartpaths=chartpaths,
+                savepath=reportdir / "report.html"
+            )
+        
+        if not flags.get("noplots") or not flags.get("noreports"):
+            self.logger.info(f"Reports generated: {comparisonpath}")
         else:
             self.logger.info(f"Outputs logged.")
-        return str(index_path)
+        
+        return str(comparisonpath) if comparisonpath else str(reportdir)
+
     
     def generate_index_page(
         self, 

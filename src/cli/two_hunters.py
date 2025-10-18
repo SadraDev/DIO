@@ -67,10 +67,14 @@ def two_hunters_cli(ctx, config, verbose, quiet):
               help='Skip report generation (backtest only)')
 @click.option('--no-plots', is_flag=True, default=False,
               help='Skip chart generation (backtest only)')
+@click.option('--use-trend-flag', is_flag=True, default=False,
+              help='If the Mbox has trend, no signal will be generated.')
+@click.option('--use-time-flag', is_flag=True, default=False,
+              help='If the Mbox has extrema after 12, no signal will be generated.')
 @click.pass_context
 def backtest(ctx, symbol, start_date, end_date, balance,
              risk, no_risk_manager, output_dir, no_signals,
-             no_mbox, no_reports, no_plots
+             no_mbox, no_reports, no_plots, use_trend_flag, use_time_flag
              ):
     """Run backtesting on historical data with integrated plotting"""
     from src.strategies.two_hunters import TwoHuntersStrategy
@@ -105,6 +109,8 @@ def backtest(ctx, symbol, start_date, end_date, balance,
         twohunters.budget.current_balance = balance
         twohunters.budget.initial_risk_percent = risk
         twohunters.budget.current_risk_percent = risk
+        twohunters.use_trend_flag = use_trend_flag
+        twohunters.use_trend_flag = use_time_flag
 
         results = twohunters.backtest(
             symbols=symbols,

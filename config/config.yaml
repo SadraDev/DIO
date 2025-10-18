@@ -89,6 +89,7 @@ strategies:
       use_trend_flag: false
       use_time_flag: false
       use_choch_flag: false
+      time_flag_hour: "10:30"
     backtesting:
       default_start: "2001-09-11"
       default_end: "2001-09-11"

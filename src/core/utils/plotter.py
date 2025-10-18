@@ -697,76 +697,83 @@ class TradingPlotter:
         return html_template
 
     def create_symbol_comparison_report(
-        self, 
-        results: Dict[str, List[Signal]], 
-        save_path: Optional[Path] = None
+        self,
+        results: Dict[str, List[Signal]],
+        chartpaths: Dict[str, Dict[int, str]] = None,
+        savepath: Optional[Path] = None
     ) -> str:
-        """Create simplified symbol comparison report focused on cumulative performance"""
+        """
+        Create symbol comparison report with signals details section
         
-        if save_path is None:
+        No changes needed - already works with the new chartpaths structure!
+        """
+        if savepath is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = f"full_report_{timestamp}"
-            save_path = self.report_dir / filepath / "comparison.html"
+            filepath = f"{timestamp}"
+            savepath = self.report_dir / filepath / "report.html"
         
         # Ensure directory exists
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        savepath.parent.mkdir(parents=True, exist_ok=True)
         
         # Calculate comprehensive metrics for each symbol
-        all_signals = []  # For joint analysis
-        individual_stats = {}
+        allsignals = []
+        individualstats = {}
         
         for symbol, signals in results.items():
             if symbol == "all":
                 continue
-                
+            
             completed = [s for s in signals if hasattr(s, 'is_completed') and s.is_completed]
             
             if completed:
-                # Implement draw down
-                wins = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain >= 0]
+                wins = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain > 0]
                 losses = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain < 0]
-                win_gains = [s.gain for s in wins if hasattr(s, 'gain') and s.gain]
-                loss_gains = [s.gain for s in losses if hasattr(s, 'gain') and s.gain]
-                total_profit = sum(s.gain for s in completed if hasattr(s, 'gain') and s.gain)
-                total_commission = sum(s.commission for s in completed if hasattr(s, 'commission') and s.commission)
-                total_lot_sizes = sum(s.entry_lot for s in completed if hasattr(s, 'entry_lot') and s.entry_lot)
                 
-                # Individual symbol statistics
-                individual_stats[symbol] = {
-                    'total_trades': len(completed),
-                    'wins': len(wins),
-                    'losses': len(losses),
-                    'win_rate': (len(wins) / len(completed)) * 100,
-                    'total_profit': total_profit,
-                    'total_commission': total_commission,
-                    'avg_profit': total_profit / len(completed),
-                    'avg_lot_size': round(total_lot_sizes / len(completed), 2),
-                    'max_win': max(win_gains) if win_gains else 0,
-                    'max_loss': min(loss_gains) if loss_gains else 0,  # Most negative
-                    'avg_win': sum(win_gains) / len(win_gains) if win_gains else 0,
-                    'avg_loss': sum(loss_gains) / len(loss_gains) if loss_gains else 0
+                wingains = [s.gain for s in wins if hasattr(s, 'gain') and s.gain]
+                lossgains = [s.gain for s in losses if hasattr(s, 'gain') and s.gain]
+                
+                totalprofit = sum(s.gain for s in completed if hasattr(s, 'gain') and s.gain)
+                totalcommission = sum(s.commission for s in completed if hasattr(s, 'commission') and s.commission)
+                totallotsizes = sum(s.entry_lot for s in completed if hasattr(s, 'entry_lot') and s.entry_lot)
+                
+                individualstats[symbol] = {
+                    "totaltrades": len(completed),
+                    "wins": len(wins),
+                    "losses": len(losses),
+                    "winrate": (len(wins) / len(completed)) * 100,
+                    "totalprofit": totalprofit,
+                    "totalcommission": totalcommission,
+                    "avgprofit": totalprofit / len(completed),
+                    "avglotsize": round(totallotsizes / len(completed), 2),
+                    "maxwin": max(wingains) if wingains else 0,
+                    "maxloss": min(lossgains) if lossgains else 0,
+                    "avgwin": sum(wingains) / len(wingains) if wingains else 0,
+                    "avgloss": sum(lossgains) / len(lossgains) if lossgains else 0
                 }
-
-                # Add to joint analysis
-                all_signals.extend(completed)
+                
+                allsignals.extend(completed)
         
-
         # Calculate joint/overall statistics
-        joint_stats = self.calculate_joint_statistics(all_signals)
+        jointstats = self.calculate_joint_statistics(allsignals)
         
-        # Create only the cumulative chart if Plotly available
-        charts_html = ""
-        if PLOTLY_AVAILABLE:
-            charts_html = self.create_cumulative_chart_only(joint_stats)
+        # Create cumulative chart
+        chartshtml = ""
+        if jointstats.get("signals"):
+            chartshtml = self.create_cumulative_chart_only(jointstats)
         
-        # Generate simplified HTML
-        html_content = self.generate_simplified_comparison_html(charts_html, individual_stats, joint_stats)
+        # Generate HTML with new structure
+        htmlcontent = self.generate_report_html_with_signals(
+            chartshtml=chartshtml,
+            individualstats=individualstats,
+            jointstats=jointstats,
+            chartpaths=chartpaths
+        )
         
-        with open(save_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
+        with open(savepath, "w", encoding="utf-8") as f:
+            f.write(htmlcontent)
         
-        self.logger.info(f"Simplified symbol comparison report saved: {save_path}")
-        return str(save_path)
+        self.logger.info(f"Symbol comparison report saved: {savepath}")
+        return str(savepath)
 
     def calculate_joint_statistics(self, all_signals: List[Signal]) -> Dict[str, Any]:
         """Calculate joint statistics across all signals"""
@@ -1089,43 +1096,454 @@ class TradingPlotter:
         </div>
         """
 
-    def create_individual_stats_table(self, individual_stats: Dict) -> str:
-        """Create detailed individual statistics table"""
-        
-        table_rows = ""
-        for symbol, stats in individual_stats.items():
-            profit_class = "win" if stats['total_profit'] > 0 else "loss" if stats['total_profit'] < 0 else "neutral"
-            win_rate_class = "win" if stats['win_rate'] >= 60 else "neutral" if stats['win_rate'] >= 40 else "loss"
-            avg_lot_size = individual_stats[symbol]['avg_lot_size']
 
-            table_rows += f"""
+    def create_individual_stats_table(self, individualstats: Dict) -> str:
+        """
+        Create individual symbol statistics table with all details
+        
+        FIXED: Added more columns for comprehensive statistics
+        """
+        
+        if not individualstats:
+            return "<p>No individual statistics available.</p>"
+        
+        tablerows = ""
+        for symbol, stats in individualstats.items():
+            win_rate = stats.get('winrate', 0)
+            total_profit = stats.get('totalprofit', 0)
+            
+            profit_class = "win" if total_profit > 0 else "loss" if total_profit < 0 else "neutral"
+            avg_lot_size = stats.get('avglotsize', 0)
+            
+            tablerows += f"""
             <tr>
                 <td><strong>{symbol}</strong></td>
-                <td>{stats['total_trades']}</td>
-                <td><b>{stats['win_rate']:.1f}%</b></td>
-                <td class="{profit_class}">${stats['total_profit']:.2f}</td>
-                <td>${stats['total_commission']:.2f}</td>
-                <td>${stats['avg_profit']:.2f}</td>
+                <td>{stats.get('totaltrades', 0)}</td>
+                <td>{stats.get('wins', 0)}</td>
+                <td>{stats.get('losses', 0)}</td>
+                <td><b>{win_rate:.1f}%</b></td>
+                <td class="{profit_class}">{total_profit:.2f}</td>
+                <td>{stats.get('totalcommission', 0):.2f}</td>
+                <td>{stats.get('avgprofit', 0):.2f}</td>
+                <td class="win">{stats.get('maxwin', 0):.2f}</td>
+                <td class="loss">{stats.get('maxloss', 0):.2f}</td>
+                <td class="win">{stats.get('avgwin', 0):.2f}</td>
+                <td class="loss">{stats.get('avgloss', 0):.2f}</td>
                 <td>{avg_lot_size}</td>
             </tr>
             """
         
         return f"""
-        <table>
-            <thead>
-                <tr>
-                    <th>Symbol</th>
-                    <th>Total Trades</th>
-                    <th>Win Rate%</th>
-                    <th>Total Profit</th>
-                    <th>Total Commission</th>
-                    <th>Avg Profit/Trade</th>
-                    <th>Avg Lots Size</th>
-                </tr>
-            </thead>
-            <tbody>
-                {table_rows}
-            </tbody>
-        </table>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Total Trades</th>
+                        <th>Wins</th>
+                        <th>Losses</th>
+                        <th>Win Rate</th>
+                        <th>Total Profit</th>
+                        <th>Total Commission</th>
+                        <th>Avg Profit/Trade</th>
+                        <th>Max Win</th>
+                        <th>Max Loss</th>
+                        <th>Avg Win</th>
+                        <th>Avg Loss</th>
+                        <th>Avg Lot Size</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {tablerows}
+                </tbody>
+            </table>
+        </div>
         """
+
+    def generate_monthly_charts(
+        self,
+        barsdata: Dict[str, List[Bar]],
+        results: Dict[str, List[Signal]],
+        reportdir: Path,  # Changed from chartsdir - now pass report directory
+        showmbox: bool = True
+    ) -> Dict[str, Dict[int, str]]:
+        """
+        Args:
+            reportdir: The main report directory (e.g., reports/20251018_214150/)
+            
+        Returns:
+            Dict mapping symbol -> month -> chart_path
+            Example: {"EURUSD": {6: "EURUSD/6.html", 7: "EURUSD/7.html"}, ...}
+        """
+        from collections import defaultdict
+        
+        # Organize by symbol and month
+        symbol_monthly_data = defaultdict(lambda: defaultdict(lambda: {"bars": [], "signals": []}))
+        
+        # Group bars by symbol, then by month
+        for symbol, bars in barsdata.items():
+            for bar in bars:
+                month = bar.timestamp.month
+                symbol_monthly_data[symbol][month]["bars"].append(bar)
+        
+        # Group signals by symbol, then by month
+        for symbol, signals in results.items():
+            if symbol == "all":
+                continue
+            for signal in signals:
+                if hasattr(signal, 'timestamp') and signal.timestamp:
+                    month = signal.timestamp.month
+                    symbol_monthly_data[symbol][month]["signals"].append(signal)
+        
+        # Generate charts: one directory per symbol
+        chartpaths = {}
+        
+        for symbol in sorted(symbol_monthly_data.keys()):
+            # Create symbol directory
+            symbol_clean = symbol.replace('.', '')
+            symboldir = reportdir / symbol_clean
+            symboldir.mkdir(parents=True, exist_ok=True)
+            
+            chartpaths[symbol] = {}
+            
+            # Generate chart for each month within this symbol
+            for month in sorted(symbol_monthly_data[symbol].keys()):
+                data = symbol_monthly_data[symbol][month]
+                
+                if not data["bars"]:
+                    continue
+                
+                # Sort bars by timestamp
+                sorted_bars = sorted(data["bars"], key=lambda b: b.timestamp)
+                
+                # Create chart file: {symbol}/month.html
+                chartpath = symboldir / f"{month}.html"
+                
+                # Generate the chart
+                self.plot_candlestick_interactive(
+                    bars=sorted_bars,
+                    signals=data["signals"] if data["signals"] else None,
+                    symbol=symbol,
+                    title=f"{symbol} - Month {month}",
+                    show_mbox=showmbox,
+                    save_path=chartpath,
+                    return_as_div=False
+                )
+                
+                # Store relative path from report.html
+                relative_path = f"{symbol_clean}/{month}.html"
+                chartpaths[symbol][month] = relative_path
+                
+                self.logger.info(f"Generated chart: {relative_path}")
+        
+        return chartpaths
+
+    def generate_report_html_with_signals(
+        self,
+        chartshtml: str,
+        individualstats: Dict,
+        jointstats: Dict,
+        chartpaths: Dict[int, str] = None
+    ) -> str:
+        """Generate HTML report with signals details section"""
+        
+        # Create summary sections
+        jointsummary = self.create_joint_summary_section(jointstats)
+        individualtable = self.create_individual_stats_table(individualstats)
+        
+        # Create signals details section with FULL details
+        signalsdetails = self.create_signals_details_section(
+            jointstats.get("signals", []),
+            chartpaths
+        )
+        
+        htmltemplate = f"""<!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Trading Report - Comprehensive Analysis</title>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+            }}
+            .container {{
+                max-width: 1800px;
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 15px;
+                padding: 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            }}
+            .chart-section {{
+                margin-bottom: 40px;
+                background: white;
+                border-radius: 10px;
+                padding: 20px;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }}
+            .chart-section h3 {{
+                color: #2c3e50;
+                border-bottom: 3px solid #3498db;
+                padding-bottom: 15px;
+                margin-bottom: 25px;
+                font-size: 1.8em;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin: 20px 0;
+                background: white;
+                border-radius: 10px;
+                overflow: hidden;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }}
+            th, td {{
+                padding: 12px 8px;
+                text-align: center;  /* FIXED: Center all table text */
+                border-bottom: 1px solid #ddd;
+            }}
+            th {{
+                background: linear-gradient(45deg, #3498db, #2980b9);
+                color: white;
+                font-weight: bold;
+                text-transform: uppercase;
+                font-size: 0.85em;
+            }}
+            tr:nth-child(even) {{
+                background-color: #f8f9fa;
+            }}
+            tr:hover {{
+                background-color: #e3f2fd;
+                transition: background-color 0.3s ease;
+            }}
+            .win {{
+                color: #27ae60;
+                font-weight: bold;
+            }}
+            .loss {{
+                color: #e74c3c;
+                font-weight: bold;
+            }}
+            .neutral {{
+                color: #f39c12;
+                font-weight: bold;
+            }}
+            .section-divider {{
+                height: 3px;
+                background: linear-gradient(45deg, #3498db, #2980b9);
+                margin: 40px 0;
+                border-radius: 2px;
+            }}
+            .btn-show-chart {{
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 0.85em;
+                transition: all 0.3s ease;
+            }}
+            .btn-show-chart:hover {{
+                background-color: #2980b9;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            }}
+            .btn-show-chart:disabled {{
+                background-color: #95a5a6;
+                cursor: not-allowed;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1 style="text-align: center; color: #2c3e50; margin-bottom: 40px;">Trading Report</h1>
+            
+            {jointsummary}
+            
+            {chartshtml}
+            
+            <hr class="section-divider">
+            
+            <div class="chart-section">
+                <h3>Detailed Individual Symbol Statistics</h3>
+                {individualtable}
+            </div>
+            
+            <hr class="section-divider">
+            
+            {signalsdetails}
+        </div>
+        
+        <script>
+            function openChart(chartFile, signalTime) {{
+                if (!chartFile) {{
+                    alert('Chart file not available for this signal');
+                    return;
+                }}
+                window.open(chartFile, '_blank');
+            }}
+        </script>
+    </body>
+    </html>"""
+        
+        return htmltemplate
     
+
+    def create_signals_details_section(
+        self,
+        signals: List[Signal],
+        chartpaths: Dict[str, Dict[int, str]] = None
+    ) -> str:
+        """Create signals details section with links to symbol-separated charts"""
+        
+        if not signals:
+            return '<div class="chart-section"><h3>Signals Details</h3><p>No signals to display.</p></div>'
+        
+        # Sort signals by timestamp
+        sorted_signals = sorted(
+            signals,
+            key=lambda s: s.timestamp if hasattr(s, 'timestamp') and s.timestamp else datetime.min
+        )
+        
+        # Import Budget for balance calculation
+        from src.core.models.budget import Budget
+        budget = Budget()
+        
+        tablerows = ""
+        for i, signal in enumerate(sorted_signals, 1):
+            # Extract all signal information
+            timestamp = signal.timestamp.strftime("%Y-%m-%d %H:%M") if hasattr(signal, 'timestamp') and signal.timestamp else "N/A"
+            symbol = getattr(signal, 'symbol', 'Unknown')
+            action = signal.action.value if hasattr(signal, 'action') else 'N/A'
+            
+            # Entry and exit prices
+            entry_price = f"{signal.entry_price:.5f}" if hasattr(signal, 'entry_price') and signal.entry_price else "N/A"
+            sl_price = f"{signal.stop_loss:.5f}" if hasattr(signal, 'stop_loss') and signal.stop_loss else "N/A"
+            tp_price = f"{signal.take_profit:.5f}" if hasattr(signal, 'take_profit') and signal.take_profit else "N/A"
+            
+            # Outcome and adjustments
+            outcome = signal.outcome.value.upper() if hasattr(signal, 'outcome') and signal.outcome else 'PENDING'
+            sl_adjusted = signal.sl_adjusted_count if hasattr(signal, 'sl_adjusted_count') else 0
+            
+            # Lot size and pips
+            lot_size = f"{signal.entry_lot:.2f}" if hasattr(signal, 'entry_lot') and signal.entry_lot else "N/A"
+            sl_pips = f"{signal.stop_loss_pips:.2f}" if hasattr(signal, 'stop_loss_pips') and signal.stop_loss_pips else "N/A"
+            tp_pips = f"{signal.take_profit_pips:.2f}" if hasattr(signal, 'take_profit_pips') and signal.take_profit_pips else "N/A"
+            
+            # Commission and profit
+            commission = f"{signal.commission:.2f}" if hasattr(signal, 'commission') and signal.commission else "0.00"
+            profit = f"{signal.gain:.2f}" if hasattr(signal, 'gain') and signal.gain is not None else "0.00"
+            
+            # Calculate balance
+            budget.apply_signal_gain(signal)
+            current_balance = round(budget.current_balance)
+            
+            # Find chart file: symbol/month.html
+            chart_file = ""
+            chart_available = False
+            if chartpaths and hasattr(signal, 'timestamp') and signal.timestamp:
+                month = signal.timestamp.month
+                
+                # Check if we have a chart for this symbol and month
+                if symbol in chartpaths and month in chartpaths[symbol]:
+                    # Get the relative path (already stored as "SYMBOL/month.html")
+                    chart_file = chartpaths[symbol][month]
+                    chart_available = True
+            
+            # Create button
+            if chart_available:
+                chart_button = f'<button class="btn-show-chart" onclick="openChart(\'{chart_file}\', \'{timestamp}\')">Show in Chart</button>'
+            else:
+                chart_button = '<button class="btn-show-chart" disabled>No Chart</button>'
+            
+            # Determine CSS class for outcome
+            outcome_class = "win" if hasattr(signal, 'gain') and signal.gain and signal.gain > 0 else "loss" if hasattr(signal, 'gain') and signal.gain and signal.gain < 0 else "neutral"
+            
+            tablerows += f"""
+            <tr>
+                <td>{i}</td>
+                <td>{timestamp}</td>
+                <td>{symbol}</td>
+                <td>{action}</td>
+                <td>{entry_price}</td>
+                <td>{sl_price}</td>
+                <td>{tp_price}</td>
+                <td class="{outcome_class}">{outcome}</td>
+                <td>{sl_adjusted}</td>
+                <td>{lot_size}</td>
+                <td>{sl_pips}</td>
+                <td>{tp_pips}</td>
+                <td>{commission}</td>
+                <td class="{outcome_class}">{profit}</td>
+                <td>{current_balance}</td>
+                <td>{chart_button}</td>
+            </tr>
+            """
+        
+        return f"""
+        <div class="chart-section">
+            <h3>Signals Details</h3>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>DateTime</th>
+                            <th>Symbol</th>
+                            <th>Action</th>
+                            <th>Entry</th>
+                            <th>SL</th>
+                            <th>TP</th>
+                            <th>Outcome</th>
+                            <th>SL Adj</th>
+                            <th>Lot Size</th>
+                            <th>SL Pips</th>
+                            <th>TP Pips</th>
+                            <th>Commission</th>
+                            <th>Profit</th>
+                            <th>Balance</th>
+                            <th>Chart</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {tablerows}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        """
+
+    def create_charts_section(self, chartpaths: Dict[int, str]) -> str:
+        """Create the charts section with links"""
+        
+        if not chartpaths:
+            return ""
+        
+        chart_links = ""
+        month_names = {
+            1: "January", 2: "February", 3: "March", 4: "April",
+            5: "May", 6: "June", 7: "July", 8: "August",
+            9: "September", 10: "October", 11: "November", 12: "December"
+        }
+        
+        for month in sorted(chartpaths.keys()):
+            month_name = month_names.get(month, f"Month {month}")
+            # Create relative path
+            chart_file = f"charts/{month}.html"
+            chart_links += f'<a href="{chart_file}" target="_blank" style="display: inline-block; margin: 10px; padding: 10px 20px; background-color: #3498db; color: white; text-decoration: none; border-radius: 5px;">{month_name}</a>'
+        
+        return f"""
+        <div class="chart-section">
+            <h3>Monthly Charts</h3>
+            <p>Click on a month to view the detailed chart:</p>
+            <div style="text-align: center; margin: 20px 0;">
+                {chart_links}
+            </div>
+        </div>
+        """

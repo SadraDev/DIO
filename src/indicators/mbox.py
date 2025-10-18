@@ -3,8 +3,8 @@ from datetime import time
 from src.core.models.budget import Budget
 from src.core.models.bar import Bar
 from src.indicators.base import BaseIndicator
-
-
+from config.settings import settings
+from datetime import datetime
 
 class MBoxAnalyzer(BaseIndicator):
     """
@@ -39,9 +39,12 @@ class MBoxAnalyzer(BaseIndicator):
         # Analyze overall trend and confidence
         trend, trend_conf = self.detect_trend(bars)
 
+        time_flag_hour_str = settings.get("strategies.two_hunters.time_flag_hour")
+        time_flag_hour = datetime.strptime(time_flag_hour_str, "%H:%M").time()
+
         # Time of extrema in relation to 07:00 UTC
-        max_time_flag = "before" if ts_max.time() < time(7, 0) else "after"
-        min_time_flag = "before" if ts_min.time() < time(7, 0) else "after"
+        max_time_flag = "before" if ts_max.time() < time_flag_hour else "after"
+        min_time_flag = "before" if ts_min.time() < time_flag_hour else "after"
         extrema_time_flag = not (max_time_flag == "before" and min_time_flag == "before")
 
         return {
