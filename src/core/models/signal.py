@@ -4,7 +4,6 @@ from enum import Enum
 from config.settings import settings
 
 if TYPE_CHECKING:
-    from src.core.models.budget import Budget
     from src.core.models.bar import Bar
 
 class SignalAction(Enum):
@@ -74,6 +73,9 @@ class Signal:
         self.trend = None
         self.fake_CHoCH = None
         self.time_flag = None
+
+        # Toggle if any flag is use not to generate signal
+        self.used_flag = False
         
         # Risk management tracking
         self.sl_adjusted_count = 0
@@ -102,7 +104,11 @@ class Signal:
     def is_completed(self) -> bool:
         """Check if signal is completed (win or loss)"""
         return self.outcome in [SignalOutcome.WIN, SignalOutcome.LOSS]
-    
+
+    @property
+    def has_flag(self) -> bool:
+        return self.trend or self.time_flag or self.fake_CHoCH
+
     def reward_ratio(self) -> float:
         """Calculate reward to risk ratio (TP pips / SL pips)"""
         if self.stop_loss_pips is None or self.stop_loss_pips <= 0:
@@ -134,22 +140,21 @@ class Signal:
                         entry_price=self.entry_price, current_sl=self.stop_loss)
     
     # MAIN EVALUATION METHOD - COMPLETELY REWRITTEN WITH SINGLE LOOP
-    def evaluate_signal(self, risk_manager: bool = True, max_fetch_attempts: int = 5) -> Optional['Bar']:
+    def evaluate_signal(self, budget = None, risk_manager: bool = True, max_fetch_attempts: int = 5) -> Optional['Bar']:
         """
         Evaluate signal outcome with SINGLE-LOOP processing and automatic bar fetching
         COMPLETELY REWRITTEN: Uses Budget for all calculations, eliminates double-looping
         """
         from src.core.utils.logger import log_signal_event
-        from src.core.models.budget import Budget
         from src.core.data.fetcher import DataFetcher
 
-        budget = Budget()
         fetcher = DataFetcher()
 
         # Calculate position size using Budget's ratio_amount if not set
         fetch_attempts = 1
-        commission_amount = settings.get("trading.commission")
-        
+        commission_diff = budget.calculate_commission_diff()
+        commission_value = settings.get("trading.commission")
+
         # MAIN EVALUATION LOOP WITH AUTOMATIC BAR FETCHING
         while not self.is_completed and fetch_attempts <= max_fetch_attempts:
             # Filter bars after signal timestamp
@@ -169,7 +174,6 @@ class Signal:
                     fetch_attempts += 1
                     continue
             
-
             # SINGLE LOOP: Process bars chronologically  
             for bar in evaluation_bars:
 
@@ -253,7 +257,7 @@ class Signal:
                                             fetch_attempts=fetch_attempts)
             
                 if self.is_completed:
-                    self.commission = self.entry_lot * commission_amount * 100000
+                    self.commission = self.entry_lot * commission_value
                     self.gain -= self.commission
                     break
 
@@ -284,15 +288,15 @@ class Signal:
                         #         lil_boy = True
                         #         self.adjust_stop_loss(new_sl, "BAD GET OUT") if self.stop_loss > new_sl else self.stop_loss
                         
-                        if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_amount and not lil_boy:
-                            new_sl = self.initial_stop_loss - commission_amount
+                        if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_diff and not lil_boy:
+                            new_sl = self.initial_stop_loss - commission_diff
 
                             if self.stop_loss > new_sl:
                                 self.adjust_stop_loss(new_sl, "Reached commission amount" if not lil_boy else "GET OUT")
 
                         # 1R favorable movement (price going down)
                         if not risk_free_1r_applied and bar.low <= self.initial_entry_price - ratio_amount and not lil_boy:
-                            new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_amount
+                            new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_diff
 
                             if self.stop_loss > new_sl:
                                 self.adjust_stop_loss(new_sl, "1R_favorable" if not lil_boy else "GET OUT")
@@ -300,7 +304,7 @@ class Signal:
                         
                         # 2R breakeven
                         if not risk_free_2r_applied and bar.low <= round(self.initial_entry_price - 2 * ratio_amount, 5):
-                            new_sl = self.initial_entry_price - commission_amount
+                            new_sl = self.initial_entry_price - commission_diff
 
                             if self.stop_loss > new_sl:
                                 self.adjust_stop_loss(new_sl, "2R_breakeven")
@@ -308,16 +312,16 @@ class Signal:
                         
         
                         if abs(bar.low - self.take_profit) <= 0.20*ratio_amount:
-                            new_sl = bar.low + commission_amount
-                            new_tp = bar.low - 0.25*ratio_amount - commission_amount
+                            new_sl = bar.low + commission_diff
+                            new_tp = bar.low - 0.25*ratio_amount - commission_diff
                             self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
                             self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
                         
 
                         # # Near TP profit locking        
                         # if abs(bar.low - self.take_profit) <= 0.1 * ratio_amount and bar.low < self.take_profit:
-                        #     new_sl = bar.low + commission_amount
-                        #     new_tp = bar.low - commission_amount*2
+                        #     new_sl = bar.low + commission_diff
+                        #     new_tp = bar.low - commission_diff*2
                         #     self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
                         #     self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
                         
@@ -345,7 +349,7 @@ class Signal:
                         
                         # 1R favorable movement (price going up)
                         if not risk_free_1r_applied and bar.high >= self.initial_entry_price + ratio_amount and not lil_boy:
-                            new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_amount
+                            new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_diff
                                 
                             if self.stop_loss <= new_sl:
                                 self.adjust_stop_loss(new_sl, "1R_favorable") 
@@ -353,7 +357,7 @@ class Signal:
                         
                         # 2R breakeven
                         if not risk_free_2r_applied and bar.high >= self.initial_entry_price + 2 * ratio_amount:
-                            new_sl = self.initial_entry_price + commission_amount
+                            new_sl = self.initial_entry_price + commission_diff
 
                             if self.stop_loss <= new_sl:
                                 self.adjust_stop_loss(new_sl, "2R_breakeven")
@@ -361,15 +365,15 @@ class Signal:
 
 
                         if abs(bar.high - self.take_profit) <= 0.20*ratio_amount:
-                            new_sl = bar.high - commission_amount
-                            new_tp = bar.high + 0.25*ratio_amount + commission_amount
+                            new_sl = bar.high - commission_diff
+                            new_tp = bar.high + 0.25*ratio_amount + commission_diff
                             self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
                             self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
 
                         # # Near TP profit locking
                         # if abs(bar.high - self.take_profit) <= 0.1 * ratio_amount or bar.high > self.take_profit:
-                        #     new_sl = bar.high - commission_amount
-                        #     new_tp = bar.high + commission_amount*2
+                        #     new_sl = bar.high - commission_diff
+                        #     new_tp = bar.high + commission_diff*2
                         #     self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
                         #     self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
 
@@ -384,21 +388,21 @@ class Signal:
                     if self.is_sell:
                         is_65_percent_down = bar.low < self.initial_entry_price - abs(self.initial_entry_price - self.initial_take_profit) * 0.65
                         if not first_applied and is_65_percent_down:
-                            new_sl = self.initial_stop_loss - commission_amount
+                            new_sl = self.initial_stop_loss - commission_diff
                             self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss > new_sl else self.stop_loss
                         
                         if not second_applied and bar.low < self.initial_take_profit:
-                            new_sl = bar.high - commission_amount
+                            new_sl = bar.high - commission_diff
                             self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss > new_sl else self.stop_loss
 
                     if self.is_buy:
                         is_65_percent_down = bar.high > self.initial_entry_price + abs(self.initial_entry_price + self.initial_take_profit) * 0.65
                         if not first_applied and is_65_percent_down:
-                            new_sl = self.initial_stop_loss + commission_amount
+                            new_sl = self.initial_stop_loss + commission_diff
                             self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss < new_sl else self.stop_loss
                         
                         if not second_applied and bar.high > self.initial_take_profit:
-                            new_sl = bar.low + commission_amount
+                            new_sl = bar.low + commission_diff
                             self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss < new_sl else self.stop_loss
 
             # If we've processed all current bars without an outcome, try to fetch more
@@ -425,7 +429,7 @@ class Signal:
             return False
 
         ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
-        commission_amount = settings.get("trading.commission")
+        commission_diff = settings.get("trading.commission")
         risk_free_1r_applied = False
         risk_free_2r_applied = False
         lil_boy = False
@@ -443,15 +447,15 @@ class Signal:
                 if self.action == SignalAction.SELL:
 
                     # Adjust for commission
-                    if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_amount and not lil_boy:
-                        new_sl = self.initial_stop_loss - commission_amount
+                    if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_diff and not lil_boy:
+                        new_sl = self.initial_stop_loss - commission_diff
 
                         if self.stop_loss > new_sl:
                             self.adjust_stop_loss(new_sl, "Reached commission amount" if not lil_boy else "GET OUT")
 
                     # 1R favorable
                     if not risk_free_1r_applied and bar.low <= self.initial_entry_price - ratio_amount and not lil_boy:
-                        new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_amount
+                        new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_diff
 
                         if self.stop_loss > new_sl:
                             self.adjust_stop_loss(new_sl, "1R_favorable" if not lil_boy else "GET OUT")
@@ -459,7 +463,7 @@ class Signal:
                     
                     # 2R breakeven
                     if not risk_free_2r_applied and bar.low <= round(self.initial_entry_price - 2 * ratio_amount, 5):
-                        new_sl = self.initial_entry_price - commission_amount
+                        new_sl = self.initial_entry_price - commission_diff
 
                         if self.stop_loss > new_sl:
                             self.adjust_stop_loss(new_sl, "2R_breakeven")
@@ -467,14 +471,14 @@ class Signal:
                     
                     # Near 3R
                     if abs(bar.low - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = bar.low + commission_amount
-                        new_tp = bar.low - 0.25*ratio_amount - commission_amount
+                        new_sl = bar.low + commission_diff
+                        new_tp = bar.low - 0.25*ratio_amount - commission_diff
                         self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
                         self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
                         
                     elif abs(live_bar.low - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = live_bar.low + commission_amount
-                        new_tp = live_bar.low - 0.25*ratio_amount - commission_amount
+                        new_sl = live_bar.low + commission_diff
+                        new_tp = live_bar.low - 0.25*ratio_amount - commission_diff
                         self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
                         self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
 
@@ -484,8 +488,8 @@ class Signal:
                 elif self.action == SignalAction.BUY:
 
                     # Adjust for commission
-                    if not risk_free_1r_applied and bar.high >= self.initial_entry_price + commission_amount and not lil_boy:
-                        new_sl = self.initial_stop_loss + commission_amount
+                    if not risk_free_1r_applied and bar.high >= self.initial_entry_price + commission_diff and not lil_boy:
+                        new_sl = self.initial_stop_loss + commission_diff
 
                         if self.stop_loss < new_sl:
                             self.adjust_stop_loss(new_sl, "Reached commission amount" if not lil_boy else "GET OUT")
@@ -493,7 +497,7 @@ class Signal:
 
                     # 1R favorable
                     if not risk_free_1r_applied and bar.high >= self.initial_entry_price + ratio_amount and not lil_boy:
-                        new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_amount
+                        new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_diff
                             
                         if self.stop_loss <= new_sl:
                             self.adjust_stop_loss(new_sl, "1R_favorable") 
@@ -501,7 +505,7 @@ class Signal:
                     
                     # 2R breakeven
                     if not risk_free_2r_applied and bar.high >= self.initial_entry_price + 2 * ratio_amount:
-                        new_sl = self.initial_entry_price + commission_amount
+                        new_sl = self.initial_entry_price + commission_diff
 
                         if self.stop_loss <= new_sl:
                             self.adjust_stop_loss(new_sl, "2R_breakeven")
@@ -509,14 +513,14 @@ class Signal:
 
 
                     if abs(bar.high - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = bar.high - commission_amount
-                        new_tp = bar.high + 0.25*ratio_amount + commission_amount
+                        new_sl = bar.high - commission_diff
+                        new_tp = bar.high + 0.25*ratio_amount + commission_diff
                         self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
                         self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
 
                     if abs(live_bar.high - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = live_bar.high - commission_amount
-                        new_tp = live_bar.high + 0.25*ratio_amount + commission_amount
+                        new_sl = live_bar.high - commission_diff
+                        new_tp = live_bar.high + 0.25*ratio_amount + commission_diff
                         self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
                         self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
 
@@ -527,21 +531,21 @@ class Signal:
                 if self.is_sell:
                     is_65_percent_down = live_bar.low < self.initial_entry_price - abs(self.initial_entry_price - self.initial_take_profit) * 0.65
                     if not first_applied and is_65_percent_down:
-                        new_sl = self.initial_stop_loss - commission_amount
+                        new_sl = self.initial_stop_loss - commission_diff
                         self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss > new_sl else self.stop_loss
                     
                     if not second_applied and live_bar.low < self.initial_take_profit:
-                        new_sl = live_bar.high - commission_amount
+                        new_sl = live_bar.high - commission_diff
                         self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss > new_sl else self.stop_loss
 
                 if self.is_buy:
                     is_65_percent_down = live_bar.high > self.initial_entry_price + abs(self.initial_entry_price + self.initial_take_profit) * 0.65
                     if not first_applied and is_65_percent_down:
-                        new_sl = self.initial_stop_loss + commission_amount
+                        new_sl = self.initial_stop_loss + commission_diff
                         self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss < new_sl else self.stop_loss
                     
                     if not second_applied and live_bar.high > self.initial_take_profit:
-                        new_sl = live_bar.low + commission_amount
+                        new_sl = live_bar.low + commission_diff
                         self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss < new_sl else self.stop_loss
     
     # BINARY OPTION ANALYSIS (Preserved)

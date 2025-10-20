@@ -3,6 +3,7 @@ Configuration Management Module
 Handles loading and accessing configuration from YAML file
 """
 import yaml
+import sys
 from typing import Any, Dict, Optional
 from pathlib import Path
 
@@ -25,9 +26,15 @@ class Settings:
     def load_config(self, config_path: Optional[str] = None):
         """Load configuration from YAML file"""
         if config_path is None:
-            # Default to config.yaml in the config directory
-            config_dir = Path(__file__).parent
-            config_path = config_dir / "config.yaml"
+            # Handle both normal execution and PyInstaller bundle
+            if getattr(sys, 'frozen', False):
+                # Running in PyInstaller bundle
+                base_path = Path(sys._MEIPASS)
+            else:
+                # Running as normal script
+                base_path = Path(__file__).parent.parent
+            
+            config_path = base_path / "config" / "config.yaml"
         
         try:
             with open(config_path, 'r', encoding='utf-8') as f:

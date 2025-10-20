@@ -19,7 +19,8 @@ class FakeCHoCHDetector(BaseIndicator):
         use_volume: bool = False,
         detailed: bool = False,
         single_hit: bool = True,
-        volume_factor: float = 1.2
+        volume_factor: float = 1.2,
+        budget: Budget = None
     ):
         super().__init__("FakeCHoCHDetector")
         
@@ -31,6 +32,7 @@ class FakeCHoCHDetector(BaseIndicator):
         self.detailed = detailed
         self.single_hit = single_hit
         self.volume_factor = volume_factor
+        self.budget = budget
 
     def is_swing_high(self, bars: List[Bar], i: int) -> bool:
         """Identify swing high using 5-bar fractal pattern."""
@@ -153,6 +155,5 @@ class FakeCHoCHDetector(BaseIndicator):
         Determine if a reversal is significant enough based on pip difference.
         """
         diff = abs(local_max - local_min)
-        budget = Budget()
-        pips = budget.pips_from_diff(diff)
+        pips = self.budget.pips_from_diff(diff)
         return pips > self.intensity

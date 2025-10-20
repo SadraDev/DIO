@@ -24,13 +24,13 @@ class Budget:
         self.current_balance = self.initial_balance
         
         # Risk management
-        self.initial_risk_percent = initial_risk_percent or settings.get('account.default_risk_percent', 0.01)
+        self.initial_risk_percent = initial_risk_percent or settings.get('account.default_risk_percent', 1000)
         self.current_risk_percent = self.initial_risk_percent
         
         # Market parameters from config
-        self.standard_pip_size = settings.get('market.standard_pip_size', 0.0001)
-        self.standard_lot_size = settings.get('market.standard_lot_size', 100000)
-        self.min_lot_size = settings.get('market.min_lot_size', 0.01)
+        self.pip_size = None #settings.get('market.standard_pip_size', 100000)
+        self.lot_size = None #settings.get('market.standard_lot_size', 100000)
+        self.min_lot_size = settings.get('market.min_lot_size', 1000)
 
         # Prop trading thresholds from config
         self.daily_fail_threshold = settings.get('account.prop_trading.daily_fail_percent', 0.05)
@@ -79,14 +79,14 @@ class Budget:
     def apply_signal_gain(self, signal: Signal):
         """Apply signal gain/loss to current balance"""
         self.current_balance += signal.gain
-    
+
     def pips_from_diff(self, price_diff: float) -> float:
         """Convert price difference to pips"""
-        return abs(price_diff) / self.standard_pip_size
+        return abs(price_diff) / self.pip_size
     
     def diff_from_pips(self, pips: float) -> float:
         """Convert pips to price difference"""
-        return abs(pips) * self.standard_pip_size
+        return abs(pips) * self.pip_size
     
     def value_from_percent(self, percent: float) -> float:
         """Convert percentage of balance to monetary value"""
@@ -109,27 +109,15 @@ class Budget:
         if reward_ratio <= 0:
             raise ValueError("Reward ratio must be non-negative")
         return self.risk_amount() * reward_ratio
-    
-    # ENHANCED POSITION SIZING - NOW USES RISK_AMOUNT DIRECTLY
-    def calculate_pip_value(self, symbol: str) -> float:
-        """
-        Calculate pip value for ONE standard lot (100,000 units)
-        COMPREHENSIVE symbol support with proper pip sizes
-        
-        Args:
-            symbol: Trading symbol (e.g., "EURUSD", "USDJPY") 
-            entry_price: Current market price
-            
-        Returns:
-            Pip value in USD for 1.0 standard lot
-        """
-        # Clean symbol
-        if symbol is None:
-            return 0        # TODO: trace back to the issue
-        
 
-        clean_symbol = symbol.rstrip('.').upper()
+    def calculate_pip_size(self, symbol: str):
+        # Clean symbol
+
+        if symbol is None:
+            return 0
         
+        clean_symbol = symbol.rstrip('.').upper()
+
         # Symbol pip sizes - comprehensive list
         pip_sizes = {
             # Major forex pairs (0.0001 pip)
@@ -137,16 +125,16 @@ class Budget:
             'USDCAD': 0.0001, 'USDCHF': 0.0001, 'EURGBP': 0.0001, 'EURAUD': 0.0001,
             'EURNZD': 0.0001, 'EURCHF': 0.0001, 'EURCAD': 0.0001, 'GBPAUD': 0.0001,
             'GBPNZD': 0.0001, 'GBPCAD': 0.0001, 'GBPCHF': 0.0001, 'AUDNZD': 0.0001,
-            'AUDCAD': 0.0001, 'AUDCHF': 0.0001, 'NZDCAD': 0.0001, 'NZDCHF': 0.0001, 
+            'AUDCAD': 0.0001, 'AUDCHF': 0.0001, 'NZDCAD': 0.0001, 'NZDCHF': 0.0001,
             'CADCHF': 0.0001,
             
-            # JPY pairs (0.01 pip) 
+            # JPY pairs (0.01 pip)
             'USDJPY': 0.01, 'EURJPY': 0.01, 'GBPJPY': 0.01, 'AUDJPY': 0.01,
             'NZDJPY': 0.01, 'CADJPY': 0.01, 'CHFJPY': 0.01,
             
             # Commodities 
             'XAUUSD': 0.01,   # Gold
-            'XAGUSD': 0.001,  # Silver  
+            'XAGUSD': 0.001,  # Silver
             'WTIUSD': 0.01,   # Oil
             'UKOIL': 0.01,    # Brent Oil
             
@@ -157,23 +145,79 @@ class Budget:
             'GER30': 1.0,     # DAX
             'UK100': 1.0,     # FTSE
             'JPN225': 1.0,    # Nikkei
-            
-            # Crypto
-            'BTCUSD': 1.0,
-            'ETHUSD': 0.01,
-            'LTCUSD': 0.01,
-            'ADAUSD': 0.0001,
-            'DOTUSD': 0.001,
         }
-        
+
         # Get pip size
-        pip_size = pip_sizes.get(clean_symbol, 0.0001)  # Default 0.0001
+        self.pip_size = pip_sizes.get(clean_symbol)
+        return self.pip_size
+
+    def calculate_lot_size(self, symbol: str):
+        # Clean symbol
+
+        if symbol is None:
+            return 0
+        
+        clean_symbol = symbol.rstrip('.').upper()
+
+        # Symbol lot sizes
+        per_lot = {
+            # Major forex pairs (100000 pip)
+            'EURUSD': 100000, 'GBPUSD': 100000, 'AUDUSD': 100000, 'NZDUSD': 100000,
+            'USDCAD': 100000, 'USDCHF': 100000, 'EURGBP': 100000, 'EURAUD': 100000,
+            'EURNZD': 100000, 'EURCHF': 100000, 'EURCAD': 100000, 'GBPAUD': 100000,
+            'GBPNZD': 100000, 'GBPCAD': 100000, 'GBPCHF': 100000, 'AUDNZD': 100000,
+            'AUDCAD': 100000, 'AUDCHF': 100000, 'NZDCAD': 100000, 'NZDCHF': 100000,
+            'CADCHF': 100000,
+            
+            # JPY pairs (1000 pip)
+            'USDJPY': 1000, 'EURJPY': 1000, 'GBPJPY': 1000, 'AUDJPY': 1000,
+            'NZDJPY': 1000, 'CADJPY': 1000, 'CHFJPY': 1000,
+            
+            # Commodities 
+            'XAUUSD': 100000,   # Gold
+            'XAGUSD': 500,  # Silver
+            'WTIUSD': 1000,   # Oil
+            'UKOIL': 1000,    # Brent Oil
+            
+            # Indices
+            'US30': 1000,      # Dow Jones
+            'US500': 100,     # S&P 500
+            'NAS100': 100,    # Nasdaq
+            'GER30': 1000,     # DAX
+            'UK100': 1000,     # FTSE
+            'JPN225': 1000,    # Nikkei
+        }
+
+        # Get lot size
+        self.lot_size = per_lot.get(clean_symbol)
+        return self.lot_size
+
+    # ENHANCED POSITION SIZING - NOW USES RISK_AMOUNT DIRECTLY
+    def calculate_pip_value(self, symbol: str) -> float:
+        """
+        Calculate pip value for ONE standard lot (100,000 units)
+        COMPREHENSIVE symbol support with proper pip sizes
+        
+        Args:
+            symbol: Trading symbol (e.g., "EURUSD", "USDJPY")
+            entry_price: Current market price
+            
+        Returns:
+            Pip value in USD for 1.0 standard lot
+        """
         
         # Standard lot size
-        lot_size = self.standard_lot_size  # 100,000
-        
+        lot_size = self.calculate_lot_size(symbol)
+        pip_size = self.calculate_pip_size(symbol)
         return pip_size * lot_size
-    
+
+    def calculate_commission_diff(self):
+        dif = settings.get("trading.commission") / self.lot_size
+        return dif
+
+    def calculate_commission_value_per_lot(self):
+        ...
+
     def lots_from_diff(self, symbol: str, sl_distance: float) -> float:
         """
         Calculate position size based on RISK_AMOUNT - THE CORE METHOD
@@ -211,7 +255,6 @@ class Budget:
         # Round to minimum lot size and apply limits
         lot_size = max(round(lot_size, 2), self.min_lot_size)
         lot_size = min(lot_size, 10.0)  # Max 10 lots
-        
         return lot_size
     
     def calculate_gain_loss(self, symbol: str, entry_price: float, exit_price: float, 

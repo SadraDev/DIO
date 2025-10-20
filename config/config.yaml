@@ -10,7 +10,7 @@ paths:
 # Account Settings
 account:
   initial_balance: 10000
-  default_risk_percent: 0.01
+  default_risk_percent: 0.005
   prop_trading:
     daily_fail_percent: 0.05
     total_fail_percent: 0.08
@@ -18,7 +18,7 @@ account:
 
 # Trading Configuration
 trading:
-  commission: 0.00007
+  commission: 5
   symbols: ["EURUSD.", "GBPUSD."]
   max_signals_per_symbol: 2
   risk:
@@ -53,7 +53,7 @@ data:
 # Strategy Configurations
 strategies:
   two_hunters:
-    margin_pips: 0.05
+    margin_pips: 0.01
     fvg:
       min_size_pips: 1.0
       max_size_pips: 3.0
@@ -69,12 +69,6 @@ strategies:
     session_time:
       start: "12:31"
       end: "16:30"
-    # mbox_time:
-    #   start: "06:42"
-    #   end: "06:49"
-    # session_time:
-    #   start: "06:43"
-    #   end: "13:30"
     choch:
       window: 15
       tolerance: 5
@@ -84,6 +78,7 @@ strategies:
       single_hit: true
       volume_factor: 1.2
     flags:
+      use_risk_manager: false
       use_trading_hours: false
       use_all_flags: false
       use_trend_flag: false
@@ -92,7 +87,7 @@ strategies:
       time_flag_hour: "10:30"
     backtesting:
       default_start: "2001-09-11"
-      default_end: "2001-09-11"
+      default_end: "2001-09-12"
       save_results: true
       output_format: "csv"
     live_trading:
@@ -104,10 +99,6 @@ strategies:
       system_hours:
         start: "09:30"
         end: "13:30"
-      # system_hours:
-      #   start: "02:00"
-      #   end: "13:30"
-
 
 # Logging Configuration
 logging:

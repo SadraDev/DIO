@@ -2,13 +2,12 @@ import asyncio
 import threading
 import json
 import time as goodtimes
-from datetime import datetime, timedelta, time, date, timezone
+from datetime import datetime, timedelta, time, date
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
-import signal as os_signal
 from collections import defaultdict
 
-from src.core.models.signal import Signal, SignalAction, SignalType, SignalOutcome
+from src.core.models.signal import Signal, SignalAction, SignalType
 from src.core.models.bar import Bar
 from src.core.models.budget import Budget
 from src.indicators.breakout import BreakoutEngine
@@ -16,7 +15,7 @@ from src.indicators.mbox import MBoxAnalyzer
 from src.indicators.choch import FakeCHoCHDetector
 from src.core.execution.mt5_connection import MT5Connection
 from src.core.data.fetcher import DataFetcher
-from src.core.utils.logger import TradingLogger, log_signal_event, log_system_event, log_order_event
+from src.core.utils.logger import TradingLogger, log_signal_event, log_system_event
 from config.settings import settings
 
 class TwoHuntersStrategy():
@@ -34,17 +33,34 @@ class TwoHuntersStrategy():
     - Session Hours: When trading analysis and signal generation happens
     """
     
-    def __init__(self, name: str = "Two-Hunters", budget: Budget = None):
+    def __init__(
+            self, 
+            name: str = "Two-Hunters",
+            budget: Budget = None,
+            use_all_flags: bool = False,
+            use_trading_hours: bool = False,
+            use_trend_flag: bool = False,
+            use_time_flag: bool = False,
+            use_choch_flag: bool = False
+            ):
         # Load strategy configuration
         self.config = settings.get_strategy_config("two_hunters")
-
-        # Initialize indicators
-        self._init_indicators()
 
         # Initialize budget
         self.budget = Budget() if budget is None else budget
         self.name = name
 
+        # Initialize indicators
+        self._init_indicators()
+
+        # Feature flags (from config)  
+        flags = self.config.get("flags", {})
+        self.use_all_flags = True if use_all_flags else flags.get("use_all_flags", False)
+        self.use_trading_hours = True if use_trading_hours else flags.get("use_trading_hours", False)
+        self.use_trend_flag = True if use_trend_flag else flags.get("use_trend_flag", False)
+        self.use_time_flag = True if use_time_flag else flags.get("use_time_flag", False)
+        self.use_choch_flag = True if use_choch_flag else flags.get("use_choch_flag", False)
+        
         # Symbol
         self.symbol: str = None
 
@@ -59,20 +75,12 @@ class TwoHuntersStrategy():
         
         # Strategy parameters (from config)
         self.max_signals_per_symbol = settings.max_signals_per_symbol
-        self.margin_pips = self.config.get("margin_pips", 0.05)
+        self.margin_pips = self.config.get("margin_pips")
         self.fvg_range = (
             self.config.get("fvg", {}).get("min_size_pips", 1.0),
             self.config.get("fvg", {}).get("max_size_pips", 3.0)
         )
         self.ratios = self.config.get("ratios", {"stop_loss": 1.0, "take_profit": 3.0})
-        
-        # Feature flags (from config)  
-        flags = self.config.get("flags", {})
-        self.use_trading_hours = flags.get("use_trading_hours", False)
-        self.use_all_flags = flags.get("use_all_flags", False)
-        self.use_trend_flag = flags.get("use_trend_flag", False)
-        self.use_time_flag = flags.get("use_time_flag", False)
-        self.use_choch_flag = flags.get("use_choch_flag", False)
         
         self.logger = TradingLogger.get_trading_logger()
         
@@ -87,8 +95,9 @@ class TwoHuntersStrategy():
         self.breakout_engine = BreakoutEngine(
             num_hunt=breakout_config.get("num_hunt_main", 2)
         )
+
         # MBox Analyzer
-        self.mbox_analyzer = MBoxAnalyzer()
+        self.mbox_analyzer = MBoxAnalyzer(budget=self.budget)
         
         # Fake CHoCH Detector
         choch_config = self.config.get("choch", {})
@@ -99,7 +108,8 @@ class TwoHuntersStrategy():
             intensity=choch_config.get("intensity", 3.0),
             use_volume=choch_config.get("use_volume", False),
             single_hit=choch_config.get("single_hit", True),
-            volume_factor=choch_config.get("volume_factor", 1.2)
+            volume_factor=choch_config.get("volume_factor", 1.2),
+            budget=self.budget
         )
     
     def _get_mbox_time(self) -> Tuple[time, time]:
@@ -183,8 +193,7 @@ class TwoHuntersStrategy():
             before_bar = after_bar = signal_bar
         
         entry_price = signal_bar.close
-        loss_margin = self.budget.diff_from_pips(self.margin_pips)
-        commission = settings.get("trading.commission")
+        commission = self.budget.calculate_commission_diff()
         
         # Fair Value Gap (FVG) logic
         min_fvg, max_fvg = self.fvg_range
@@ -207,7 +216,8 @@ class TwoHuntersStrategy():
                 self.logger.debug(f"SELL FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f} -- NOT USED --")
             
             entry_price = signal_bar.close
-            stop_loss = self.ratios["stop_loss"] * (extrema + loss_margin)
+            diff = abs(extrema - entry_price)
+            stop_loss = self.ratios["stop_loss"] * (extrema + (diff*self.margin_pips))
             take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss) - commission
         
         elif action == SignalAction.BUY:
@@ -220,7 +230,8 @@ class TwoHuntersStrategy():
                 self.logger.debug(f"BUY FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f} -- NOT USED --")
             
             entry_price = signal_bar.close
-            stop_loss = self.ratios["stop_loss"] * (extrema - loss_margin)
+            diff = abs(extrema - entry_price)
+            stop_loss = self.ratios["stop_loss"] * (extrema - (diff*self.margin_pips))
             take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss) + commission
         
         self.logger.debug(f"Entry calculation: EP={entry_price:.5f}, SL={stop_loss:.5f}, TP={take_profit:.5f}")
@@ -260,6 +271,7 @@ class TwoHuntersStrategy():
     def check_strategy_flags(self, signal: Signal) -> bool:
         """Check if signal passes strategy flag requirements"""
         if self.use_all_flags:
+            self.use_trading_hours = True
             self.use_trend_flag = True
             self.use_time_flag = True
             self.use_choch_flag = True
@@ -268,14 +280,17 @@ class TwoHuntersStrategy():
         violations = []
         
         if self.use_trend_flag and signal.trend:
+            signal.used_flag = True
             violations.append("trend_flag")
         
         if self.use_time_flag and signal.time_flag:
+            signal.used_flag = True
             violations.append("time_flag")
         
         if self.use_choch_flag and not signal.fake_CHoCH:
+            signal.used_flag = True
             violations.append("choch_flag")
-        
+
         if violations:
             self.logger.debug(f"Signal rejected by flags: {violations}")
             return False
@@ -345,10 +360,6 @@ class TwoHuntersStrategy():
             signal.fake_CHoCH = faild_signal.fake_CHoCH
             signal.time_flag = faild_signal.time_flag
 
-        # Check strategy flags
-        if not self.check_strategy_flags(signal):
-            return None
-        
         # Initialize trading parameters
         self.budget.update_risk_percent(signal)
         signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
@@ -438,7 +449,7 @@ class TwoHuntersStrategy():
         symbols: List[str],
         start_date: datetime,
         end_date: datetime,
-        no_risk_manager: bool,
+        use_risk_manager: bool,
         output_dir: Optional[str] = None,
         **args
     ) -> Dict[str, Any]:
@@ -478,19 +489,22 @@ class TwoHuntersStrategy():
                 for symbol in symbols:
                     daily_bars = fetcher.fetch_bars_from_mt5(current_date_start, current_date_end, symbol)
                     bars_processed += len(daily_bars)
+
+                    self.budget.calculate_pip_size(symbol)
+                    self.budget.calculate_lot_size(symbol)
                 
                     if daily_bars:
                         self.symbol = symbol
                         self.add_bars(daily_bars)
                         main_signal = self.attempt_signal(current_date)
-                        
+
                         if main_signal:
-                            main_signal.evaluate_signal(risk_manager=not no_risk_manager)
-                            
+                            main_signal.evaluate_signal(budget=self.budget, risk_manager=use_risk_manager)
                             if main_signal.is_completed:
                                 results[symbol].append(main_signal)
                                 signals.append(main_signal)
-                                self.budget.apply_signal_gain(main_signal)
+                                if self.check_strategy_flags(main_signal):
+                                    self.budget.apply_signal_gain(main_signal)
 
                                 self.logger.debug(f"Main signal completed: {main_signal.outcome.value}, "
                                                 f"Gain: {main_signal.gain}")
@@ -500,13 +514,14 @@ class TwoHuntersStrategy():
                                     recovery_signal = self.attempt_signal(current_date, faild_signal=main_signal)
                                     
                                     if recovery_signal:
-                                        recovery_signal.evaluate_signal(risk_manager=not no_risk_manager)
+                                        recovery_signal.evaluate_signal(budget=self.budget, risk_manager=use_risk_manager)
                                         
                                         if recovery_signal.is_completed:
                                             results[symbol].append(recovery_signal)
                                             signals.append(recovery_signal)
-                                            self.budget.apply_signal_gain(recovery_signal)
-
+                                            if self.check_strategy_flags(recovery_signal):
+                                                self.budget.apply_signal_gain(recovery_signal)
+                                            
                                             self.logger.debug(f"Recovery signal completed: "
                                                             f"{recovery_signal.outcome.value}, "
                                                             f"Gain: {recovery_signal.gain}")
@@ -530,6 +545,8 @@ class TwoHuntersStrategy():
                             symbols=symbols,
                             total_signals=len(signals),
                             overall_profit=self.budget.current_balance)
+
+            click.echo("Results gathered.")
 
             # Integrated plotting functionality
             _generate = True

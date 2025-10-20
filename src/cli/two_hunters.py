@@ -49,12 +49,6 @@ def two_hunters_cli(ctx, config, verbose, quiet):
               help='Backtest start date (YYYY-MM-DD)')
 @click.option('--end-date', '-ed', type=click.DateTime(formats=['%Y-%m-%d']),
               help='Backtest end date (YYYY-MM-DD)')  
-@click.option('--balance', '-b', type=float, default=None,
-              help='Initial balance for backtest')
-@click.option('--risk', '-r', type=float, default=None,
-              help='Risk percentage per trade (e.g., 0.01 for 1%)')
-@click.option('--no-risk-manager', is_flag=True, default=False,
-              help='Show trading signals on charts')
 @click.option('--output-dir', type=click.Path(), default=None,
               help='Output directory for results')
 
@@ -67,18 +61,44 @@ def two_hunters_cli(ctx, config, verbose, quiet):
               help='Skip report generation (backtest only)')
 @click.option('--no-plots', is_flag=True, default=False,
               help='Skip chart generation (backtest only)')
+
+# TRADING FLAGS
 @click.option('--use-trend-flag', is_flag=True, default=False,
               help='If the Mbox has trend, no signal will be generated.')
 @click.option('--use-time-flag', is_flag=True, default=False,
               help='If the Mbox has extrema after 12, no signal will be generated.')
+@click.option('--use-risk-manager', is_flag=True, default=False,
+              help='Show trading signals on charts')
+
+# VALUES
+@click.option('--commission', type=float, default=None,
+              help='Commission amount per lot.')
+@click.option('--balance', '-b', type=float, default=None,
+              help='Initial balance for backtest')
+@click.option('--risk', '-r', type=float, default=None,
+              help='Risk percentage per trade (e.g., 0.01 for 1%)')
 @click.pass_context
-def backtest(ctx, symbol, start_date, end_date, balance,
-             risk, no_risk_manager, output_dir, no_signals,
-             no_mbox, no_reports, no_plots, use_trend_flag, use_time_flag
-             ):
+def backtest(ctx, symbol, start_date, end_date,
+             output_dir, no_signals, no_mbox,
+             no_reports, no_plots, use_trend_flag,
+             use_time_flag, use_risk_manager,
+             commission, balance, risk):
+    
     """Run backtesting on historical data with integrated plotting"""
     from src.strategies.two_hunters import TwoHuntersStrategy
-    twohunters = TwoHuntersStrategy()
+    from src.core.models.budget import Budget
+    from config.settings import settings
+
+    if risk is not None: risk /= 100
+    settings.set("trading.commission", commission) if commission is not None else None
+    settings.set("strategies.two_hunters.flags.use_trend_flag", use_trend_flag)
+    settings.set("strategies.two_hunters.flags.use_risk_manager", use_risk_manager)
+    settings.set("strategies.two_hunters.flags.use_time_flag", use_time_flag)
+    settings.set("account.default_risk_percent", risk) if risk is not None else None
+    settings.set("account.initial_balance", balance) if balance is not None else None
+
+    budget = Budget(initial_balance=balance, initial_risk_percent=risk)
+    twohunters = TwoHuntersStrategy(budget=budget, use_trend_flag=use_trend_flag, use_time_flag=use_time_flag)
 
     # Use defaults if not provided
     symbols = list(symbol) if symbol else settings.symbols
@@ -97,27 +117,19 @@ def backtest(ctx, symbol, start_date, end_date, balance,
     if not ctx.obj['quiet']:
         click.echo(f"Starting backtest with {', '.join(symbols)}")
         click.echo(f"Period: {start_date.date()} to {end_date.date()}")
-        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%} | Risk Manager: {'Enabled' if not no_risk_manager else 'Disabled'}")
+        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%} | Risk Manager: {'Enabled' if use_risk_manager else 'Disabled'}")
         click.echo(f"Charts: {'Enabled' if not no_plots else 'Disabled'}")
         click.echo(f"   Show Mbox: {'Enabled' if not no_mbox else 'Disabled'}") if not no_plots else None
         click.echo(f"   Show Signals: {'Enabled' if not no_signals else 'Disabled'}") if not no_plots else None
         click.echo(f"Reports: {'Enabled' if not no_reports else 'Disabled'}")
     
-    
     try:
-        twohunters.budget.initial_balance = balance
-        twohunters.budget.current_balance = balance
-        twohunters.budget.initial_risk_percent = risk
-        twohunters.budget.current_risk_percent = risk
-        twohunters.use_trend_flag = use_trend_flag
-        twohunters.use_trend_flag = use_time_flag
-
         results = twohunters.backtest(
             symbols=symbols,
             start_date=start_date,
             end_date=end_date,
             output_dir=output_dir,
-            no_risk_manager=no_risk_manager,
+            use_risk_manager=use_risk_manager,
             verbose=ctx.obj['verbose'],
             # Plotting parameters (only if not disabled)
             no_reports=no_reports,

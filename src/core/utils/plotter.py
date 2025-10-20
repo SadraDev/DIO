@@ -468,234 +468,6 @@ class TradingPlotter:
         self.logger.info(f"Static chart saved: {save_path}")
         return str(save_path)
 
-    def create_performance_report(
-        self, 
-        signals: List[Signal], 
-        symbol: str = "SYMBOL", 
-        save_path: Optional[Path] = None
-    ) -> str:
-        """Create simplified performance report with cumulative PL chart and signals table"""
-        
-        if not signals:
-            self.logger.warning("No signals provided for performance report")
-            return ""
-        
-        if save_path is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{symbol}_performance_{timestamp}.html"
-            save_path = self.report_dir / "interactive" / filename
-        
-        # Ensure directory exists
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Get completed signals
-        completed_signals = [s for s in signals if hasattr(s, 'is_completed') and s.is_completed]
-        
-        if not completed_signals:
-            self.logger.warning("No completed signals for performance analysis")
-            return ""
-        
-        wins = sum(1 for s in completed_signals if hasattr(s, 'gain') and s.gain and s.gain >= 0)
-        total_profit = sum(s.gain for s in completed_signals if hasattr(s, 'gain') and s.gain)
-        
-        # Create single cumulative PL chart
-        if PLOTLY_AVAILABLE:
-            fig = go.Figure()
-            
-            # Cumulative PL line
-            cumulative_pnl = []
-            total = 0
-            dates = []
-            
-            for signal in completed_signals:
-                if hasattr(signal, 'gain') and signal.gain and hasattr(signal, 'timestamp') and signal.timestamp:
-                    total += signal.gain
-                    cumulative_pnl.append(total)
-                    dates.append(signal.timestamp)
-            
-            if dates and cumulative_pnl:
-                fig.add_trace(go.Scatter(
-                    x=dates,
-                    y=cumulative_pnl,
-                    mode='lines+markers',
-                    name='Cumulative PL',
-                    line=dict(color='#3498db', width=3),
-                    marker=dict(size=6)
-                ))
-            
-            fig.update_layout(
-                title=f"{symbol} Performance",
-                height=400,
-                template='plotly_white',
-                xaxis_title="Date",
-                yaxis_title="Cumulative PL ($)"
-            )
-            
-            # Generate HTML with signals table
-            html_content = self.generate_simple_performance_html(fig, completed_signals, symbol, total_profit, wins)
-            
-            with open(save_path, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-            
-            self.logger.info(f"Performance report saved: {save_path}")
-            return str(save_path)
-
-    def generate_simple_performance_html(self, fig, signals: List[Signal], symbol: str, total_profit: float, wins: int) -> str:
-        """Generate simplified performance report HTML with signals table"""
-        
-        plot_div = pyo.plot(fig, output_type='div', include_plotlyjs=True)
-        
-        # Create signals table with correct lot size field
-        table_rows = ""
-        from src.core.models.budget import Budget
-        budget = Budget()
-        commless_balance = 0
-        
-        for i, signal in enumerate(signals, 1):
-            gain = round(signal.gain, 2) if getattr(signal, 'gain', None) not in [None, 0.0] else 0.0 if getattr(signal, 'gain', None) == 0.0 else 0
-            commission = round(signal.commission, 2) if getattr(signal, 'commission') and signal.commission else 0
-            lot_size = f"{signal.entry_lot:.2f}" if hasattr(signal, 'entry_lot') and signal.entry_lot else 0
-            
-            stop_loss_pips = f"{signal.stop_loss_pips:.2f}" if hasattr(signal, 'stop_loss_pips') and signal.stop_loss_pips else 0
-            take_profit_pips = f"{signal.take_profit_pips:.2f}" if hasattr(signal, 'take_profit_pips') and signal.take_profit_pips else 0
-            timestamp = signal.timestamp.strftime("%Y-%m-%d %H:%M") if signal.timestamp else 0
-            
-            budget.apply_signal_gain(signal)
-            current_balance = round(budget.current_balance)
-            commless_balance = int(current_balance) + int(commission)
-            
-            outcome_class = "win" if signal.gain > 0 else "loss" if signal.gain < 0 else "neutral"
-            
-            table_rows += f"""
-            <tr>
-                <td>{i}</td>
-                <td>{timestamp}</td>
-                <td>{signal.action.value}</td>
-                <td class="{outcome_class}">{outcome_class.upper()}</td>
-                <td>{signal.sl_adjusted_count}</td>
-                <td>{lot_size}</td>
-                <td>{stop_loss_pips}</td>
-                <td>{take_profit_pips}</td>
-                <td>{commission}$</td>
-                <td class="{outcome_class}">{gain}$</td>
-                <td><b>{current_balance}$</b></td>
-                <td><b>{commless_balance}$</b></td>
-            </tr>
-            """
-
-        html_template = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>{symbol} Performance Report</title>
-            <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    margin: 0;
-                    padding: 20px;
-                    background: #f5f5f5;
-                }}
-                .container {{
-                    max-width: 1400px;
-                    margin: 0 auto;
-                    background: white;
-                    border-radius: 10px;
-                    padding: 30px;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-                }}
-                .chart-section {{
-                    margin-bottom: 40px;
-                }}
-                .signals-section h2 {{
-                    color: #2c3e50;
-                    border-bottom: 3px solid #3498db;
-                    padding-bottom: 10px;
-                }}
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 20px;
-                }}
-                th, td {{
-                    padding: 10px;
-                    text-align: left;
-                    border-bottom: 1px solid #ddd;
-                }}
-                th {{
-                    background-color: #3498db;
-                    color: white;
-                    font-weight: bold;
-                }}
-                tr:nth-child(even) {{
-                    background-color: #f2f2f2;
-                }}
-                .win {{
-                    color: #27ae60;
-                    font-weight: bold;
-                }}
-                .loss {{
-                    color: #e74c3c;
-                    font-weight: bold;
-                }}
-                .neutral {{
-                    color: #7f8c8d;
-                }}
-                .summary {{
-                    background: linear-gradient(45deg, #667eea, #764ba2);
-                    color: white;
-                    padding: 20px;
-                    border-radius: 10px;
-                    margin-bottom: 30px;
-                    text-align: center;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>{symbol} Analysis</h1>
-                
-                <div class="summary">
-                    <h2>Total Profit: ${total_profit:.2f}</h2>
-                    <p>Wins: {wins} / Total Trades: {len(signals)} | Win Rate: {(wins/len(signals)*100):.1f}%</p>
-                </div>
-                
-                <div class="chart-section">
-                    <h2>Performance</h2>
-                    {plot_div}
-                </div>
-                
-                <div class="signals-section">
-                    <h2>Signal Details</h2>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Date/Time</th>
-                                <th>Action</th>
-                                <th>Outcome</th>
-                                <th>SL Adj</th>
-                                <th>Lot Size</th>
-                                <th>Stop Loss Pips</th>
-                                <th>Take Profit Pips</th>
-                                <th>Commission</th>
-                                <th>Profit</th>
-                                <th>Curent Balance</th>
-                                <th>C-L Balance</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {table_rows}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return html_template
-
     def create_symbol_comparison_report(
         self,
         results: Dict[str, List[Signal]],
@@ -776,39 +548,120 @@ class TradingPlotter:
         return str(savepath)
 
     def calculate_joint_statistics(self, all_signals: List[Signal]) -> Dict[str, Any]:
-        """Calculate joint statistics across all signals"""
-        
+        """Calculate joint statistics across all signals, including drawdown and underwater time"""
+
         if not all_signals:
             return {}
-        
-        wins = [s for s in all_signals if hasattr(s, 'gain') and s.gain and s.gain >= 0]
-        losses = [s for s in all_signals if hasattr(s, 'gain') and s.gain and s.gain < 0]
-        win_gains = [s.gain for s in wins if hasattr(s, 'gain') and s.gain]
-        loss_gains = [s.gain for s in losses if hasattr(s, 'gain') and s.gain]
-        total_profit = sum(s.gain for s in all_signals if hasattr(s, 'gain') and s.gain)
-        
+
+        # Configurable initial balance; fall back to a sane default if missing/invalid
+        initial_balance = settings.get("account.initial_balance")
+        try:
+            initial_balance = float(initial_balance) if initial_balance is not None else 10000.0
+        except Exception:
+            initial_balance = 10000.0
+
+        # Keep only signals that are not marked used_flag
+        usable = [s for s in all_signals if not getattr(s, "used_flag", False)]
+
+        # Aggregations on usable signals
+        wins = [s for s in usable if getattr(s, 'gain', None) is not None and s.gain >= 0]
+        losses = [s for s in usable if getattr(s, 'gain', None) is not None and s.gain < 0]
+        win_gains = [s.gain for s in wins if s.gain is not None]
+        loss_gains = [s.gain for s in losses if s.gain is not None]
+        total_profit = sum(s.gain for s in usable if getattr(s, 'gain', None) is not None)
+
+        # Sort usable signals by timestamp; stable fallback for missing timestamps
+        signals_sorted = sorted(
+            usable,
+            key=lambda s: (s.timestamp if getattr(s, "timestamp", None) else datetime.min)
+        )
+
+        # Build equity curve starting at initial_balance
+        equity_points = []  # list[(ts, equity)]
+        equity = float(initial_balance)
+
+        # Seed an initial point to establish the baseline peak at the start of series
+        seed_ts = signals_sorted[0].timestamp if signals_sorted and signals_sorted[0].timestamp else datetime.min
+        equity_points.append((seed_ts, equity))
+
+        for s in signals_sorted:
+            gain = s.gain if getattr(s, "gain", None) is not None else 0.0
+            equity += gain
+            ts = s.timestamp if getattr(s, "timestamp", None) else (equity_points[-1][0] + timedelta(microseconds=1))
+            equity_points.append((ts, equity))
+
+        # Drawdown and underwater calculations
+        max_dd_abs = 0.0
+        max_dd_pct = 0.0
+        longest_uw = timedelta(0)
+        current_uw_start: Optional[datetime] = None
+
+        # Initialize rolling peak to initial_balance
+        peak_equity = equity_points[0][1] if equity_points else initial_balance
+
+        for ts, eq in equity_points:
+            # New peak closes any underwater interval
+            if eq > peak_equity + 1e-12:
+                if current_uw_start is not None:
+                    longest_uw = max(longest_uw, ts - current_uw_start)
+                    current_uw_start = None
+                peak_equity = eq
+
+            dd_abs = max(0.0, peak_equity - eq)
+            # Percent drawdown guarded against tiny peaks
+            dd_pct = (dd_abs / peak_equity) if peak_equity > 1e-9 else 0.0
+
+            if dd_abs > max_dd_abs:
+                max_dd_abs = dd_abs
+            if dd_pct > max_dd_pct:
+                max_dd_pct = dd_pct
+
+            # Track underwater intervals
+            if eq < peak_equity - 1e-12:
+                if current_uw_start is None:
+                    current_uw_start = ts
+            else:
+                if current_uw_start is not None:
+                    longest_uw = max(longest_uw, ts - current_uw_start)
+                    current_uw_start = None
+
+        # If still underwater at the end, close the interval at the last timestamp
+        if current_uw_start is not None:
+            last_ts = equity_points[-1][0]
+            longest_uw = max(longest_uw, last_ts - current_uw_start)
+
         return {
             'total_signals': len(all_signals),
             'total_wins': len(wins),
             'total_losses': len(losses),
-            'overall_win_rate': (len(wins) / len(all_signals)) * 100,
+            'overall_win_rate': (len(wins) / len(usable)) * 100 if usable else 0.0,
             'total_profit': total_profit,
-            'avg_profit_per_trade': total_profit / len(all_signals),
-            'max_win': max(win_gains) if win_gains else 0,
-            'max_loss': min(loss_gains) if loss_gains else 0,
-            'avg_win': sum(win_gains) / len(win_gains) if win_gains else 0,
-            'avg_loss': sum(loss_gains) / len(loss_gains) if loss_gains else 0,
-            'total_win_amount': sum(win_gains) if win_gains else 0,
-            'total_loss_amount': sum(loss_gains) if loss_gains else 0,
-            'profit_factor': abs(sum(win_gains) / sum(loss_gains)) if loss_gains and sum(loss_gains) != 0 else float('inf'),
-            'signals': sorted(all_signals, key=lambda s: s.timestamp if hasattr(s, 'timestamp') and s.timestamp else datetime.min)
+            'avg_profit_per_trade': (total_profit / len(usable)) if usable else 0.0,
+            'max_win': max(win_gains) if win_gains else 0.0,
+            'max_loss': min(loss_gains) if loss_gains else 0.0,
+            'avg_win': (sum(win_gains) / len(win_gains)) if win_gains else 0.0,
+            'avg_loss': (sum(loss_gains) / len(loss_gains)) if loss_gains else 0.0,
+            'total_win_amount': sum(win_gains) if win_gains else 0.0,
+            'total_loss_amount': sum(loss_gains) if loss_gains else 0.0,
+            'profit_factor': (abs(sum(win_gains) / sum(loss_gains)) if loss_gains and sum(loss_gains) != 0 else float('inf')),
+            'signals': signals_sorted,
+
+            # New fields:
+            'drawdown_abs': max_dd_abs,             # currency units
+            'drawdown_pct': max_dd_pct * 100.0,     # percent of rolling peak
+            'underwater_time': longest_uw,          # timedelta
+            'final_equity': equity,                 # ending equity
         }
+
 
     def create_cumulative_chart_only(self, joint_stats: Dict) -> str:
         """Create only the joint cumulative performance chart"""
         charts_html = ""
         if joint_stats.get('signals'):
-            fig_cumulative = self.create_joint_cumulative_chart(joint_stats['signals'])
+            fig_cumulative = self.create_joint_cumulative_chart(
+                                    joint_stats['signals'], joint_stats['drawdown_abs'], 
+                                    joint_stats['drawdown_pct'], joint_stats['underwater_time'])
+            
             chart_div = pyo.plot(
                 fig_cumulative,
                 output_type='div',
@@ -817,7 +670,7 @@ class TradingPlotter:
             )
             charts_html = f"""
             <div class="chart-section">
-                <h3>Joint Performance - All Signals</h3>
+                <h3>Joint Performance</h3>
                 <div class="chart-container">
                     {chart_div}
                 </div>
@@ -825,7 +678,7 @@ class TradingPlotter:
             """
         return charts_html
 
-    def create_joint_cumulative_chart(self, signals: List[Signal]) -> go.Figure:
+    def create_joint_cumulative_chart(self, signals: List[Signal], abs_value, pct, uwt) -> go.Figure:
         """Create joint cumulative performance chart for all signals"""
         
         fig = go.Figure()
@@ -907,9 +760,9 @@ class TradingPlotter:
         
         fig.update_layout(
             title={
-                'text': 'Joint Cumulative Performance',
+                'text': f'DrawDown: {round(abs_value, 1)}$    -    DraDown pct: {round(pct, 2)}%    -    UnderWater Time: {uwt.days} days',
                 'x': 0.5,
-                'xanchor': 'center'
+                'xanchor': 'right'
             },
             xaxis_title="Date",
             yaxis_title="Cumulative Profit ($)",
@@ -917,6 +770,7 @@ class TradingPlotter:
             height=None,
             width=None,
             template='plotly_white',
+            dragmode='pan',
             hovermode='closest',
             legend=dict(
                 orientation="v",
@@ -939,124 +793,103 @@ class TradingPlotter:
         
         return fig
 
-    def generate_simplified_comparison_html(self, charts_html: str, individual_stats: Dict, joint_stats: Dict) -> str:
-        """Generate simplified HTML report with only cumulative chart"""
+    def create_flags_summary_section(self) -> str:
+        """Create trading configuration summary with badge-style layout"""
         
-        # Create detailed statistics tables
-        individual_table = self.create_individual_stats_table(individual_stats)
-        joint_summary = self.create_joint_summary_section(joint_stats)
+        commission = settings.get("trading.commission")
+        risk = settings.get("account.default_risk_percent")
+        use_trend_flag = settings.get("strategies.two_hunters.flags.use_trend_flag")
+        use_risk_manager = settings.get("strategies.two_hunters.flags.use_risk_manager")
+        use_time_flag = settings.get("strategies.two_hunters.flags.use_time_flag")
+        balance = settings.get("account.initial_balance")
+
+        # Helper to generate badge HTML
+        def create_badge(label, value, is_active, icon=""):
+            if not is_active:
+                bg = "background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);"
+                text_color = "color: white;"
+                border = "border: 2px solid #c0392b;"
+            else:
+                bg = "background: linear-gradient(135deg, #27ae60 0%, #229954 100%);"
+                text_color = "color: white;"
+                border = "border: 2px solid #229954;"
+            
+            return f"""
+            <div style="{bg} {border} {text_color} padding: 12px 24px; border-radius: 25px; 
+                        display: inline-flex; align-items: center; gap: 10px; 
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin: 8px;
+                        font-weight: 600; font-size: 14px; white-space: nowrap;">
+                <span style="font-size: 18px;">{icon}</span>
+                <span>{label}: <strong>{value}</strong></span>
+            </div>
+            """
+
+        # Generate badges
+        trend_badge = create_badge(
+            "Trend Flag", 
+            "ACTIVE" if use_trend_flag else "INACTIVE",
+            use_trend_flag,
+            "📊"
+        )
         
-        html_template = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Symbol Comparison - Cumulative Performance Analysis</title>
-            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-            <style>
-                body {{
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    margin: 0;
-                    padding: 20px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
-                }}
-                .container {{
-                    max-width: 1600px;
-                    margin: 0 auto;
-                    background: rgba(255, 255, 255, 0.95);
-                    border-radius: 15px;
-                    padding: 30px;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-                }}
-                .chart-section {{
-                    margin-bottom: 40px;
-                    background: white;
-                    border-radius: 10px;
-                    padding: 20px;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-                }}
-                .chart-section h3 {{
-                    color: #2c3e50;
-                    border-bottom: 3px solid #3498db;
-                    padding-bottom: 15px;
-                    margin-bottom: 25px;
-                    font-size: 1.8em;
-                }}
-                .chart-container {{
-                    background: #fafafa;
-                    border-radius: 10px;
-                    padding: 15px;
-                }}
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin: 20px 0;
-                    background: white;
-                    border-radius: 10px;
-                    overflow: hidden;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-                }}
-                th, td {{
-                    padding: 15px;
-                    text-align: left;
-                    border-bottom: 1px solid #ddd;
-                }}
-                th {{
-                    background: linear-gradient(45deg, #3498db, #2980b9);
-                    color: white;
-                    font-weight: bold;
-                    text-transform: uppercase;
-                    font-size: 0.9em;
-                    letter-spacing: 1px;
-                }}
-                tr:nth-child(even) {{
-                    background-color: #f8f9fa;
-                }}
-                tr:hover {{
-                    background-color: #e3f2fd;
-                    transition: background-color 0.3s ease;
-                }}
-                .win {{
-                    color: #27ae60;
-                    font-weight: bold;
-                }}
-                .loss {{
-                    color: #e74c3c;
-                    font-weight: bold;
-                }}
-                .neutral {{
-                    color: #f39c12;
-                    font-weight: bold;
-                }}
-                .section-divider {{
-                    height: 3px;
-                    background: linear-gradient(45deg, #3498db, #2980b9);
-                    margin: 40px 0;
-                    border-radius: 2px;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1 style="text-align: center; color: #2c3e50; margin-bottom: 40px;">Symbol Comparison Analysis</h1>
-                
-                {joint_summary}
-                
-                {charts_html}
-                
-                <hr class="section-divider">
-                
-                <div class="chart-section">
-                    <h3>Detailed Individual Symbol Statistics</h3>
-                    {individual_table}
+        time_badge = create_badge(
+            "Time Flag",
+            "ACTIVE" if use_time_flag else "INACTIVE", 
+            use_time_flag,
+            "⏰"
+        )
+        
+        risk_mgr_badge = create_badge(
+            "Risk Manager",
+            "ACTIVE" if use_risk_manager else "INACTIVE",
+            use_risk_manager,
+            "🛡️"
+        )
+
+        return f"""
+        <div class="flags-section" style="background: white; border-radius: 10px; padding: 25px; 
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin-bottom: 30px;">
+            
+            <div style="border-left: 5px solid #3498db; padding-left: 20px; margin-bottom: 20px;">
+                <h3 style="color: #2c3e50; margin: 0 0 5px 0; font-size: 1.6em;">Trading Configuration</h3>
+                <p style="color: #7f8c8d; margin: 0; font-size: 0.95em;">Account settings and strategy flags</p>
+            </div>
+
+            <!-- Account Settings Row -->
+            <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center; 
+                        padding: 15px; background: #f8f9fa; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">💰</span>
+                    <span style="color: #2c3e50; font-size: 14px;">
+                        <strong>Balance:</strong> ${balance:,.2f}
+                    </span>
+                </div>
+                <div style="width: 2px; height: 30px; background: #ddd;"></div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">💸</span>
+                    <span style="color: #2c3e50; font-size: 14px;">
+                        <strong>Commission:</strong> ${commission}/lot
+                    </span>
+                </div>
+                <div style="width: 2px; height: 30px; background: #ddd;"></div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">⚖️</span>
+                    <span style="color: #2c3e50; font-size: 14px;">
+                        <strong>Risk:</strong> {(risk or 0) * 100:.1f}%
+                    </span>
                 </div>
             </div>
-        </body>
-        </html>
+
+            <!-- Strategy Flags Row -->
+            <div style="border-top: 2px dashed #e0e0e0; padding-top: 20px;">
+                <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
+                    {trend_badge}
+                    {time_badge}
+                    {risk_mgr_badge}
+                </div>
+            </div>
+        </div>
         """
-        
-        return html_template
 
     def create_joint_summary_section(self, joint_stats: Dict) -> str:
         """Create joint summary section with key metrics"""
@@ -1066,7 +899,7 @@ class TradingPlotter:
         
         return f"""
         <div class="chart-section">
-            <h3>Overall Performance Summary</h3>
+            <h3>Overall Performance</h3>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0;">
                 <div style="background: rgba(52, 152, 219, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #3498db;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('total_signals', 0)}</div>
@@ -1080,10 +913,6 @@ class TradingPlotter:
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('total_profit', 0):.2f}</div>
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Total Profit</div>
                 </div>
-                <div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #9b59b6;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('avg_profit_per_trade', 0):.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Avg per Trade</div>
-                </div>
                 <div style="background: rgba(230, 126, 34, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e67e22;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('max_win', 0):.2f}</div>
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Max Single Win</div>
@@ -1091,6 +920,10 @@ class TradingPlotter:
                 <div style="background: rgba(52, 73, 94, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #34495e;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${abs(joint_stats.get('max_loss', 0)):.2f}</div>
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Max Single Loss</div>
+                </div>
+                <div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #9b59b6;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('drawdown_abs', 0):.2f}</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">DrawDown</div>
                 </div>
             </div>
         </div>
@@ -1247,154 +1080,170 @@ class TradingPlotter:
     ) -> str:
         """Generate HTML report with signals details section"""
         
-        # Create summary sections
-        jointsummary = self.create_joint_summary_section(jointstats)
-        individualtable = self.create_individual_stats_table(individualstats)
+        # Create summary sections - FLAGS FIRST for prominence
+        flags_summary = self.create_flags_summary_section()
+        joint_summary = self.create_joint_summary_section(jointstats)
+        individual_table = self.create_individual_stats_table(individualstats)
         
-        # Create signals details section with FULL details
-        signalsdetails = self.create_signals_details_section(
+        # Create signals details section
+        signals_details = self.create_signals_details_section(
             jointstats.get("signals", []),
             chartpaths
         )
-        
-        htmltemplate = f"""<!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Trading Report - Comprehensive Analysis</title>
-        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-        <style>
-            body {{
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                margin: 0;
-                padding: 20px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-            }}
-            .container {{
-                max-width: 1800px;
-                margin: 0 auto;
-                background: rgba(255, 255, 255, 0.95);
-                border-radius: 15px;
-                padding: 30px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            }}
-            .chart-section {{
-                margin-bottom: 40px;
-                background: white;
-                border-radius: 10px;
-                padding: 20px;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            }}
-            .chart-section h3 {{
-                color: #2c3e50;
-                border-bottom: 3px solid #3498db;
-                padding-bottom: 15px;
-                margin-bottom: 25px;
-                font-size: 1.8em;
-            }}
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin: 20px 0;
-                background: white;
-                border-radius: 10px;
-                overflow: hidden;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            }}
-            th, td {{
-                padding: 12px 8px;
-                text-align: center;  /* FIXED: Center all table text */
-                border-bottom: 1px solid #ddd;
-            }}
-            th {{
-                background: linear-gradient(45deg, #3498db, #2980b9);
-                color: white;
-                font-weight: bold;
-                text-transform: uppercase;
-                font-size: 0.85em;
-            }}
-            tr:nth-child(even) {{
-                background-color: #f8f9fa;
-            }}
-            tr:hover {{
-                background-color: #e3f2fd;
-                transition: background-color 0.3s ease;
-            }}
-            .win {{
-                color: #27ae60;
-                font-weight: bold;
-            }}
-            .loss {{
-                color: #e74c3c;
-                font-weight: bold;
-            }}
-            .neutral {{
-                color: #f39c12;
-                font-weight: bold;
-            }}
-            .section-divider {{
-                height: 3px;
-                background: linear-gradient(45deg, #3498db, #2980b9);
-                margin: 40px 0;
-                border-radius: 2px;
-            }}
-            .btn-show-chart {{
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 5px;
-                cursor: pointer;
-                font-size: 0.85em;
-                transition: all 0.3s ease;
-            }}
-            .btn-show-chart:hover {{
-                background-color: #2980b9;
-                transform: translateY(-2px);
-                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            }}
-            .btn-show-chart:disabled {{
-                background-color: #95a5a6;
-                cursor: not-allowed;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1 style="text-align: center; color: #2c3e50; margin-bottom: 40px;">Trading Report</h1>
-            
-            {jointsummary}
-            
-            {chartshtml}
-            
-            <hr class="section-divider">
-            
-            <div class="chart-section">
-                <h3>Detailed Individual Symbol Statistics</h3>
-                {individualtable}
+
+        html_template = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Trading Report</title>
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <style>
+                body {{
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    margin: 0;
+                    padding: 20px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                }}
+                .container {{
+                    max-width: 1800px;
+                    margin: 0 auto;
+                    background: rgba(255, 255, 255, 0.95);
+                    border-radius: 15px;
+                    padding: 30px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                }}
+                .chart-section {{
+                    margin-bottom: 40px;
+                    background: white;
+                    border-radius: 10px;
+                    padding: 20px;
+                    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+                }}
+                .chart-section h3 {{
+                    color: #2c3e50;
+                    border-bottom: 3px solid #3498db;
+                    padding-bottom: 15px;
+                    margin-bottom: 25px;
+                    font-size: 1.8em;
+                }}
+                .section-divider {{
+                    border: none;
+                    height: 3px;
+                    background: linear-gradient(to right, transparent, #3498db, transparent);
+                    margin: 40px 0;
+                }}
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 20px;
+                }}
+                th, td {{
+                    padding: 12px;
+                    text-align: left;
+                    border-bottom: 1px solid #ddd;
+                }}
+                th {{
+                    background-color: #3498db;
+                    color: white;
+                    font-weight: bold;
+                    position: sticky;
+                    top: 0;
+                }}
+                tr:nth-child(even) {{
+                    background-color: #f8f9fa;
+                }}
+                tr:hover {{
+                    background-color: #e8f4f8;
+                    transition: background-color 0.2s;
+                }}
+                .win {{
+                    color: #27ae60;
+                    font-weight: bold;
+                }}
+                .loss {{
+                    color: #e74c3c;
+                    font-weight: bold;
+                }}
+                .neutral {{
+                    color: #7f8c8d;
+                }}
+                .btn-show-chart {{
+                    background: linear-gradient(135deg, #3498db, #2980b9);
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    font-size: 13px;
+                    font-weight: 600;
+                    transition: all 0.3s;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                }}
+                .btn-show-chart:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                }}
+                .btn-show-chart:disabled {{
+                    background: #95a5a6;
+                    cursor: not-allowed;
+                    transform: none;
+                }}
+                table tbody tr.flagged {{
+                    background-color: rgb(107 114 128 / 10%);
+                    color: #374151;
+                    border-left: 4px solid rgb(139 0 0 / 35%);
+                }}
+                table tbody tr.flagged td {{
+                    color: #374151;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #2c3e50; margin: 0; font-size: 2.5em;">📈 Trading Performance Report</h1>
+                </div>
+                
+                <!-- Trading Configuration (NEW STYLE) -->
+                {flags_summary}
+                
+                <!-- Overall Performance Metrics (EXISTING GRID STYLE) -->
+                {joint_summary}
+                
+                <!-- Performance Chart -->
+                {chartshtml}
+                
+                <hr class="section-divider">
+                
+                <!-- Individual Symbol Stats -->
+                <div class="chart-section">
+                    <h3>📊 Detailed Individual Symbol Statistics</h3>
+                    {individual_table}
+                </div>
+                
+                <hr class="section-divider">
+                
+                <!-- Signals Details -->
+                {signals_details}
             </div>
             
-            <hr class="section-divider">
-            
-            {signalsdetails}
-        </div>
-        
-        <script>
-            function openChart(chartFile, signalTime) {{
-                if (!chartFile) {{
-                    alert('Chart file not available for this signal');
-                    return;
+            <script>
+                function openChart(chartFile, signalTime) {{
+                    if (!chartFile) {{
+                        alert('Chart file not available for this signal');
+                        return;
+                    }}
+                    window.open(chartFile, '_blank');
                 }}
-                window.open(chartFile, '_blank');
-            }}
-        </script>
-    </body>
-    </html>"""
+            </script>
+        </body>
+        </html>
+        """
         
-        return htmltemplate
+        return html_template
     
-
     def create_signals_details_section(
         self,
         signals: List[Signal],
@@ -1464,9 +1313,11 @@ class TradingPlotter:
             
             # Determine CSS class for outcome
             outcome_class = "win" if hasattr(signal, 'gain') and signal.gain and signal.gain > 0 else "loss" if hasattr(signal, 'gain') and signal.gain and signal.gain < 0 else "neutral"
-            
+            has_flag = signal.used_flag
+            row_class = "flagged" if has_flag else ""
+
             tablerows += f"""
-            <tr>
+            <tr class="{row_class}">
                 <td>{i}</td>
                 <td>{timestamp}</td>
                 <td>{symbol}</td>
@@ -1515,35 +1366,6 @@ class TradingPlotter:
                         {tablerows}
                     </tbody>
                 </table>
-            </div>
-        </div>
-        """
-
-    def create_charts_section(self, chartpaths: Dict[int, str]) -> str:
-        """Create the charts section with links"""
-        
-        if not chartpaths:
-            return ""
-        
-        chart_links = ""
-        month_names = {
-            1: "January", 2: "February", 3: "March", 4: "April",
-            5: "May", 6: "June", 7: "July", 8: "August",
-            9: "September", 10: "October", 11: "November", 12: "December"
-        }
-        
-        for month in sorted(chartpaths.keys()):
-            month_name = month_names.get(month, f"Month {month}")
-            # Create relative path
-            chart_file = f"charts/{month}.html"
-            chart_links += f'<a href="{chart_file}" target="_blank" style="display: inline-block; margin: 10px; padding: 10px 20px; background-color: #3498db; color: white; text-decoration: none; border-radius: 5px;">{month_name}</a>'
-        
-        return f"""
-        <div class="chart-section">
-            <h3>Monthly Charts</h3>
-            <p>Click on a month to view the detailed chart:</p>
-            <div style="text-align: center; margin: 20px 0;">
-                {chart_links}
             </div>
         </div>
         """

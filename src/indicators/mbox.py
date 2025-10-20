@@ -12,8 +12,9 @@ class MBoxAnalyzer(BaseIndicator):
     Adapted from original code.
     """
 
-    def __init__(self):
+    def __init__(self, budget: Budget):
         super().__init__("MBoxAnalyzer")
+        self.budget = budget
 
     def calculate(self, bars: List[Bar]) -> Dict[str, Any]:
         """
@@ -39,7 +40,7 @@ class MBoxAnalyzer(BaseIndicator):
         # Analyze overall trend and confidence
         trend, trend_conf = self.detect_trend(bars)
 
-        time_flag_hour_str = settings.get("strategies.two_hunters.time_flag_hour")
+        time_flag_hour_str = settings.get("strategies.two_hunters.flags.time_flag_hour")
         time_flag_hour = datetime.strptime(time_flag_hour_str, "%H:%M").time()
 
         # Time of extrema in relation to 07:00 UTC
@@ -64,8 +65,6 @@ class MBoxAnalyzer(BaseIndicator):
         """
         if len(bars) < 10:
             return False, 0.0
-            
-        budget = Budget()
 
         def average_midval(subset: List[Bar]) -> float:
             return sum(bar.low + (bar.high - bar.low) / 2 for bar in subset) / len(subset)
@@ -77,8 +76,8 @@ class MBoxAnalyzer(BaseIndicator):
         min_val = min(min(ohlc) for ohlc in all_ohlc)
         max_val = max(max(ohlc) for ohlc in all_ohlc)
 
-        mbox_pip_diff = budget.pips_from_diff(max_val - min_val)
-        entry_exit_pip_diff = budget.pips_from_diff(first_avg - last_avg)
+        mbox_pip_diff = self.budget.pips_from_diff(max_val - min_val)
+        entry_exit_pip_diff = self.budget.pips_from_diff(first_avg - last_avg)
         
         if mbox_pip_diff == 0:
             return False, 0.0
