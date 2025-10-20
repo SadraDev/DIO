@@ -79,6 +79,7 @@ strategies:
       volume_factor: 1.2
     flags:
       use_risk_manager: false
+      use_commission_manager: false
       use_trading_hours: false
       use_all_flags: false
       use_trend_flag: false

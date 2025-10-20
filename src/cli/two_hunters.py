@@ -44,23 +44,23 @@ def two_hunters_cli(ctx, config, verbose, quiet):
 
 @two_hunters_cli.command()
 @click.option('--symbol', '-s', multiple=True, 
-              help='Trading symbol (e.g., EURUSD, GBPUSD)')
+              help='Trading symbol (e.g., EURUSD, GBPUSD).')
 @click.option('--start-date', '-sd', type=click.DateTime(formats=['%Y-%m-%d']),
-              help='Backtest start date (YYYY-MM-DD)')
+              help='Backtest start date (YYYY-MM-DD).')
 @click.option('--end-date', '-ed', type=click.DateTime(formats=['%Y-%m-%d']),
-              help='Backtest end date (YYYY-MM-DD)')  
+              help='Backtest end date (YYYY-MM-DD).')
 @click.option('--output-dir', type=click.Path(), default=None,
-              help='Output directory for results')
+              help='Output directory for results.')
 
 # PLOTTING OPTIONS 
 @click.option('--no-signals', is_flag=True, default=False,
-              help='Show trading signals on charts')
+              help='Show trading signals on charts.')
 @click.option('--no-mbox', is_flag=True, default=False,
-              help='Highlight trading mbox on charts')
+              help='Highlight trading mbox on charts.')
 @click.option('--no-reports', is_flag=True, default=False,
-              help='Skip report generation (backtest only)')
+              help='Skip report generation (backtest only).')
 @click.option('--no-plots', is_flag=True, default=False,
-              help='Skip chart generation (backtest only)')
+              help='Skip chart generation (backtest only).')
 
 # TRADING FLAGS
 @click.option('--use-trend-flag', is_flag=True, default=False,
@@ -68,7 +68,9 @@ def two_hunters_cli(ctx, config, verbose, quiet):
 @click.option('--use-time-flag', is_flag=True, default=False,
               help='If the Mbox has extrema after 12, no signal will be generated.')
 @click.option('--use-risk-manager', is_flag=True, default=False,
-              help='Show trading signals on charts')
+              help='Use 1R, 2R Near 3R SL adjustments.')
+@click.option('--use-commission-manager', is_flag=True, default=False,
+              help='Cover commission cost by adjusting SL.')
 
 # VALUES
 @click.option('--commission', type=float, default=None,
@@ -76,13 +78,13 @@ def two_hunters_cli(ctx, config, verbose, quiet):
 @click.option('--balance', '-b', type=float, default=None,
               help='Initial balance for backtest')
 @click.option('--risk', '-r', type=float, default=None,
-              help='Risk percentage per trade (e.g., 0.01 for 1%)')
+              help='Risk percentage per trade (e.g., 0.01 for 1%).')
 @click.pass_context
 def backtest(ctx, symbol, start_date, end_date,
              output_dir, no_signals, no_mbox,
              no_reports, no_plots, use_trend_flag,
-             use_time_flag, use_risk_manager,
-             commission, balance, risk):
+             use_time_flag, use_risk_manager, 
+             use_commission_manager, commission, balance, risk):
     
     """Run backtesting on historical data with integrated plotting"""
     from src.strategies.two_hunters import TwoHuntersStrategy
@@ -92,6 +94,7 @@ def backtest(ctx, symbol, start_date, end_date,
     settings.set("trading.commission", commission) if commission is not None else None
     settings.set("strategies.two_hunters.flags.use_trend_flag", use_trend_flag)
     settings.set("strategies.two_hunters.flags.use_risk_manager", use_risk_manager)
+    settings.set("strategies.two_hunters.flags.use_commission_manager", use_commission_manager)
     settings.set("strategies.two_hunters.flags.use_time_flag", use_time_flag)
     settings.set("account.default_risk_percent", risk) if risk is not None else None
     settings.set("account.initial_balance", balance) if balance is not None else None
@@ -116,7 +119,7 @@ def backtest(ctx, symbol, start_date, end_date,
     if not ctx.obj['quiet']:
         click.echo(f"Starting backtest with {', '.join(symbols)}")
         click.echo(f"Period: {start_date.date()} to {end_date.date()}")
-        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%} | Risk Manager: {'Enabled' if use_risk_manager else 'Disabled'}")
+        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%} | Risk Manager: {'Enabled' if use_risk_manager else 'Disabled'} | Commission Manager: {'Enabled' if use_commission_manager else 'Disabled'}")
         click.echo(f"Charts: {'Enabled' if not no_plots else 'Disabled'}")
         click.echo(f"   Show Mbox: {'Enabled' if not no_mbox else 'Disabled'}") if not no_plots else None
         click.echo(f"   Show Signals: {'Enabled' if not no_signals else 'Disabled'}") if not no_plots else None
@@ -172,7 +175,7 @@ def live(ctx, symbol, risk):
     symbols = list(symbol) if symbol else settings.get('trading.symbols', ['EURUSD.', 'GBPUSD.'])
 
     # Handle risk configuration
-    risk = settings.get('account.default_risk_percent', 0.01)
+    risk = settings.get('account.default_risk_percent', 0.005)
 
     # Detect account balance
     account = mt5.get_account_info()
@@ -182,7 +185,7 @@ def live(ctx, symbol, risk):
         if not ctx.obj['quiet']:
             click.echo(f"Account balance detected from MT5: ${balance:,.2f}")
     else:
-        balance = settings.get('account.initial_balance', 1000.0)
+        balance = settings.get('account.initial_balance', 10000.0)
         if not ctx.obj['quiet']:
             click.echo(f"Account balance fallback (config): ${balance:,.2f}")
 
@@ -197,8 +200,6 @@ def live(ctx, symbol, risk):
 
     budget = Budget(initial_risk_percent=risk, initial_balance=balance)
     twohunters = TwoHuntersStrategy(budget=budget)
-    twohunters.budget.initial_balance = balance
-    twohunters.budget.initial_risk_percent
     
     import signal
     def signal_handler(signum, frame):

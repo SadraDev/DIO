@@ -1,8 +1,7 @@
 import MetaTrader5 as mt5
-from typing import List
+from typing import List, Union, Sequence, Optional
 import datetime as dt
-from collections import defaultdict
-from zoneinfo import ZoneInfo
+import csv
 
 from src.core.models.bar import Bar
 from config.settings import settings
@@ -282,3 +281,121 @@ class DataFetcher:
             mt5.TIMEFRAME_D1: 86400
         }
         return timeframe_seconds.get(timeframe, 60)  # Default to 1 minute
+
+
+    def fetch_rates_to_csv(
+        self,
+        symbols: Union[str, Sequence[str]],
+        start_dt: dt.datetime,
+        end_dt: dt.datetime,
+        timeframe: Optional[str] = None,
+        output_dir: Optional[str] = None,
+        chunk_days: int = 30
+    ) -> dict:
+        """
+        Fetch OHLCV rates via copy_rates_range for each symbol in [start_dt, end_dt] and
+        write one CSV per symbol named <SYMBOL>.csv in output_dir.
+
+        Returns a dict {symbol: output_path} for successfully written files.
+
+        Notes:
+        - start_dt and end_dt must be timezone-aware UTC datetimes.
+        - Large ranges are chunked by chunk_days to avoid MT5 range/availability issues.
+        """
+
+        import os
+
+        # Normalize inputs
+        tf = timeframe or settings.get('data.timeframe', 'M1')
+        tf_enum = self.timeframe_map.get(tf)
+        if tf_enum is None:
+            raise ValueError(f"Unsupported timeframe: {tf}")
+
+        # Validate timezone (MT5 expects UTC for date-based copy functions)
+        if start_dt.tzinfo is None or start_dt.tzinfo.utcoffset(start_dt) is None:
+            raise ValueError("start_dt must be timezone-aware in UTC (tzinfo=ZoneInfo('UTC') or equivalent).")
+        if end_dt.tzinfo is None or end_dt.tzinfo.utcoffset(end_dt) is None:
+            raise ValueError("end_dt must be timezone-aware in UTC (tzinfo=ZoneInfo('UTC') or equivalent).")
+
+        if start_dt >= end_dt:
+            raise ValueError("start_dt must be earlier than end_dt.")
+
+        # Symbols normalization
+        if isinstance(symbols, str):
+            symbols = [symbols]
+        symbols = list(symbols)
+
+        # Output directory
+        out_dir = output_dir or os.path.join(os.getcwd(), "reports/CSVs/")
+        os.makedirs(out_dir, exist_ok=True)
+
+        # Connect MT5
+        self._ensure_connection()
+
+        written = {}
+        try:
+            for symbol in symbols:
+                self.logger.info(f"Exporting rates for {symbol} {tf} from {start_dt} to {end_dt}")
+                # Prepare CSV path
+                csv_path = os.path.join(out_dir, f"{symbol}.csv")
+
+                # Open CSV once; append chunks as they are fetched
+                with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    # Standard MT5 rates columns
+                    writer.writerow(["time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume"])
+
+                    # Chunk the range to avoid None returns for very large requests
+                    # MT5 provides only available bar history; chunking improves robustness
+                    cur_from = start_dt
+                    delta = dt.timedelta(days=chunk_days)
+
+                    total_rows = 0
+                    while cur_from < end_dt:
+                        cur_to = min(cur_from + delta, end_dt)
+
+                        # copy_rates_range expects UTC-aware datetimes and returns numpy structured array
+                        rates = mt5.copy_rates_range(symbol, tf_enum, cur_from, cur_to)
+
+                        if rates is None or len(rates) == 0:
+                            # Log and continue; empty range or unavailable data window
+                            self.logger.debug(f"No data for {symbol} between {cur_from} and {cur_to}")
+                            cur_from = cur_to
+                            continue
+
+                        # Write rows
+                        for r in rates:
+                            # 'time' from MT5 is seconds since epoch; keep as integer seconds UTC
+                            writer.writerow([
+                                int(r["time"]),
+                                float(r["open"]),
+                                float(r["high"]),
+                                float(r["low"]),
+                                float(r["close"]),
+                                int(r["tick_volume"]),
+                                int(r["spread"]),
+                                int(r["real_volume"]),
+                            ])
+                            total_rows += 1
+
+                        self.logger.debug(f"Wrote {len(rates)} rows for {symbol} chunk {cur_from} -> {cur_to}")
+                        cur_from = cur_to
+
+                if total_rows == 0:
+                    # Remove empty file to avoid clutter
+                    try:
+                        os.remove(csv_path)
+                    except Exception:
+                        pass
+                    self.logger.warning(f"No data written for {symbol} in the requested window.")
+                else:
+                    self.logger.info(f"Wrote {total_rows} rows to {csv_path} for {symbol}")
+                    written[symbol] = csv_path
+
+            return written
+
+        except Exception as e:
+            self.logger.error(f"Error exporting rates to CSV: {e}")
+            raise
+        finally:
+            self._close_connection()

@@ -800,6 +800,7 @@ class TradingPlotter:
         risk = settings.get("account.default_risk_percent")
         use_trend_flag = settings.get("strategies.two_hunters.flags.use_trend_flag")
         use_risk_manager = settings.get("strategies.two_hunters.flags.use_risk_manager")
+        use_commission_manager = settings.get("strategies.two_hunters.flags.use_commission_manager")
         use_time_flag = settings.get("strategies.two_hunters.flags.use_time_flag")
         balance = settings.get("account.initial_balance")
 
@@ -846,6 +847,13 @@ class TradingPlotter:
             "🛡️"
         )
 
+        commission_mgr_badge = create_badge(
+            "Commission Manager",
+            "ACTIVE" if use_commission_manager else "INACTIVE",
+            use_commission_manager,
+            "💲"
+        )
+
         return f"""
         <div class="flags-section" style="background: white; border-radius: 10px; padding: 25px; 
             box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin-bottom: 30px;">
@@ -886,6 +894,7 @@ class TradingPlotter:
                     {trend_badge}
                     {time_badge}
                     {risk_mgr_badge}
+                    {commission_mgr_badge}
                 </div>
             </div>
         </div>

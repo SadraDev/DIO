@@ -256,11 +256,7 @@ class MT5Connection:
                     
                     signal.gain = deal.profit
                     signal.commission = deal.commission
-                    if not signal.emergency:
-                        signal.outcome = SignalOutcome.WIN if deal.profit >= 0 else SignalOutcome.LOSS
-                    else:
-                        signal.outcome = SignalOutcome.LOSS
-                    
+                    signal.outcome = SignalOutcome.WIN if deal.profit >= 0 else SignalOutcome.LOSS                    
                     signal.outcome_timestamp = datetime.fromtimestamp(deal.time)
                     
                     log_order_event("order_closed", signal.symbol, signal.action.value,

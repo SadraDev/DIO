@@ -366,24 +366,6 @@ class TwoHuntersStrategy():
         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
         signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
 
-        # if signal.entry_lot > signal.stop_loss_pips:
-        #     signal.emergency = True
-        #     commission_amount = settings.get("trading.commission")
-        #     _multiplier = (1.5, 2.5) if signal.is_main else (2.5, 4.0)
-        #     _ratio = abs(signal.initial_entry_price - signal.initial_stop_loss)
-
-        #     if signal.is_sell:
-        #         signal.stop_loss   = signal.initial_entry_price + (_multiplier[0] * _ratio) + commission_amount
-        #         signal.take_profit = signal.initial_entry_price - (_multiplier[1] * _ratio) - commission_amount
-
-        #     if signal.is_buy:
-        #         signal.stop_loss   = signal.initial_entry_price - (_multiplier[0] * _ratio) - commission_amount
-        #         signal.take_profit = signal.initial_entry_price + (_multiplier[1] * _ratio) + commission_amount
-
-        #     signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
-        #     signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
-        #     signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
-
         # Log signal generation
         log_signal_event(
             "main_signal_generated", self.symbol, action_enum.value,
@@ -499,7 +481,7 @@ class TwoHuntersStrategy():
                         main_signal = self.attempt_signal(current_date)
 
                         if main_signal:
-                            main_signal.evaluate_signal(budget=self.budget, risk_manager=use_risk_manager)
+                            main_signal.evaluate_signal(budget=self.budget)
                             if main_signal.is_completed:
                                 results[symbol].append(main_signal)
                                 signals.append(main_signal)
@@ -514,7 +496,7 @@ class TwoHuntersStrategy():
                                     recovery_signal = self.attempt_signal(current_date, faild_signal=main_signal)
                                     
                                     if recovery_signal:
-                                        recovery_signal.evaluate_signal(budget=self.budget, risk_manager=use_risk_manager)
+                                        recovery_signal.evaluate_signal(budget=self.budget)
                                         
                                         if recovery_signal.is_completed:
                                             results[symbol].append(recovery_signal)
@@ -776,7 +758,8 @@ class TwoHuntersStrategy():
                 self.logger.info(f"Signal generated and order placed for {symbol}: {signal}")
         
         if signal and signal.ticket and signal.is_pending:
-            risk_free_tiggered = signal.risk_manager([bar for bar in new_bars if bar.timestamp > signal.timestamp])
+            if live_bar.timestamp > signal.timestamp:
+                risk_free_tiggered = signal.online_order_manager(live_bar, self.budget)
 
             if risk_free_tiggered:
                 mt5_conn.update_order(signal)
@@ -815,7 +798,8 @@ class TwoHuntersStrategy():
                         self.logger.info(f"Recovery Signal generated and order placed for {symbol}: {rec_signal}")
                 
                 if rec_signal and rec_signal.ticket and rec_signal.is_pending:
-                    risk_free_tiggered = rec_signal.risk_manager([bar for bar in new_bars if bar.timestamp > signal.timestamp])
+                    if live_bar.timestamp > rec_signal.timestamp:
+                        risk_free_tiggered = rec_signal.online_order_manager(live_bar, self.budget)
 
                     if risk_free_tiggered:
                         mt5_conn.update_order(rec_signal)
@@ -863,33 +847,53 @@ class TwoHuntersStrategy():
         except IOError as e:
             self.logger.error(f"Error saving signals file: {e}")
 
-    def _reconstruct_signal_from_dict(self, signal_dict: dict):
+    def _reconstruct_signal_from_dict(self, signal_dict: dict) -> Signal:
         """Reconstruct Signal object from dictionary"""
-        
         from src.core.models.signal import Signal, SignalAction, SignalType, SignalOutcome
         from datetime import datetime
         
         # Create basic signal
         signal = Signal(
-            action=SignalAction(signal_dict['action']),
-            entry_price=signal_dict['entry_price'],
-            stop_loss=signal_dict['stop_loss'],
-            take_profit=signal_dict['take_profit'],
-            symbol=signal_dict['symbol'],
-            timestamp=datetime.fromisoformat(signal_dict['timestamp']),
-            signal_type=SignalType(signal_dict.get('signaltype', 'main'))
+            action=SignalAction(signal_dict["action"]),
+            entry_price=signal_dict["entry_price"],
+            stop_loss=signal_dict["stop_loss"],
+            take_profit=signal_dict["take_profit"],
+            symbol=signal_dict["symbol"],
+            timestamp=datetime.fromisoformat(signal_dict["timestamp"]),
+            signal_type=SignalType(signal_dict.get("signal_type", "main")),
         )
         
-        # Set additional attributes
-        signal.ticket = signal_dict.get('ticket')
-        signal.entry_lot = signal_dict.get('entry_lot')
-        signal.gain = signal_dict.get('gain')
+        # Set price levels and initial values
+        signal.initial_entry_price = signal_dict.get("initial_entry_price", signal_dict["entry_price"])
+        signal.initial_stop_loss = signal_dict.get("initial_stop_loss", signal_dict["stop_loss"])
+        signal.initial_take_profit = signal_dict.get("initial_take_profit", signal_dict["take_profit"])
         
-        # Set outcome if exists
-        if signal_dict.get('outcome'):
-            signal.outcome = SignalOutcome(signal_dict['outcome'])
-            if signal_dict.get('outcome_timestamp'):
-                signal.outcome_timestamp = datetime.fromisoformat(signal_dict['outcome_timestamp'])
+        # Set position sizing and metrics
+        signal.entry_lot = signal_dict.get("entry_lot")
+        signal.stop_loss_pips = signal_dict.get("stop_loss_pips")
+        signal.take_profit_pips = signal_dict.get("take_profit_pips")
+        
+        # Set outcome tracking
+        if signal_dict.get("outcome"):
+            signal.outcome = SignalOutcome(signal_dict["outcome"])
+        if signal_dict.get("outcome_timestamp"):
+            signal.outcome_timestamp = datetime.fromisoformat(signal_dict["outcome_timestamp"])
+        signal.exit_pips = signal_dict.get("exit_pips")
+        signal.exit_price = signal_dict.get("exit_price")
+        signal.gain = signal_dict.get("gain")
+        
+        # Set order execution details
+        signal.ticket = signal_dict.get("ticket")
+        signal.commission = signal_dict.get("commission")
+        
+        # Set strategy flags and metadata
+        signal.trend = signal_dict.get("trend")
+        signal.fake_CHoCH = signal_dict.get("fake_CHoCH")
+        signal.time_flag = signal_dict.get("time_flag")
+        signal.used_flag = signal_dict.get("used_flag", False)
+        
+        # Set risk management tracking
+        signal.sl_adjusted_count = signal_dict.get("sl_adjusted_count", 0)
         
         return signal
 

@@ -55,14 +55,12 @@ class Signal:
         self.entry_lot = entry_lot
         self.stop_loss_pips = stop_loss_pips
         self.take_profit_pips = take_profit_pips
-        self.emergency: bool = False
         
         # Outcome tracking
         self.outcome: Optional[SignalOutcome] = SignalOutcome.PENDING
         self.outcome_timestamp: Optional[datetime] = None
         self.exit_pips: Optional[float] = None
         self.exit_price: Optional[float] = None
-        self.lil_boy: bool = False
         self.gain = gain
         
         # Order execution details
@@ -140,7 +138,7 @@ class Signal:
                         entry_price=self.entry_price, current_sl=self.stop_loss)
     
     # MAIN EVALUATION METHOD - COMPLETELY REWRITTEN WITH SINGLE LOOP
-    def evaluate_signal(self, budget = None, risk_manager: bool = True, max_fetch_attempts: int = 5) -> Optional['Bar']:
+    def evaluate_signal(self, budget = None, max_fetch_attempts: int = 5) -> Optional['Bar']:
         """
         Evaluate signal outcome with SINGLE-LOOP processing and automatic bar fetching
         COMPLETELY REWRITTEN: Uses Budget for all calculations, eliminates double-looping
@@ -152,7 +150,6 @@ class Signal:
 
         # Calculate position size using Budget's ratio_amount if not set
         fetch_attempts = 1
-        commission_diff = budget.calculate_commission_diff()
         commission_value = settings.get("trading.commission")
 
         # MAIN EVALUATION LOOP WITH AUTOMATIC BAR FETCHING
@@ -210,7 +207,7 @@ class Signal:
                                             lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
                                             fetch_attempts=fetch_attempts)
                         else:
-                            self.update_outcome(SignalOutcome.WIN if not self.lil_boy else SignalOutcome.LOSS, actual_loss, bar.timestamp)
+                            self.update_outcome(SignalOutcome.WIN, actual_loss, bar.timestamp)
                             log_signal_event("signal_win", self.symbol, self.action.value,
                                             gain=actual_loss, exit_price=self.stop_loss,
                                             pips=budget.pips_from_diff(abs(self.initial_entry_price - self.stop_loss)),
@@ -249,7 +246,7 @@ class Signal:
                                             lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
                                             fetch_attempts=fetch_attempts)
                         else:
-                            self.update_outcome(SignalOutcome.WIN if not self.lil_boy else SignalOutcome.LOSS, actual_loss, bar.timestamp)
+                            self.update_outcome(SignalOutcome.WIN, actual_loss, bar.timestamp)
                             log_signal_event("signal_win", self.symbol, self.action.value,
                                             gain=actual_loss, exit_price=self.stop_loss,
                                             pips=budget.pips_from_diff(abs(self.stop_loss - self.initial_entry_price)),
@@ -261,149 +258,8 @@ class Signal:
                     self.gain -= self.commission
                     break
 
-                # === STEP 2: APPLY RISK-FREE MANAGEMENT (if enabled) ===
-                if risk_manager and bar is not None and not self.emergency:
-                    # Risk-free management setup
-                    ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
-                    risk_free_1r_applied = False
-                    risk_free_2r_applied = False
-                    lil_boy = False
-                    
-                    if self.action == SignalAction.SELL:
-
-                        # # GET OUTs
-                        # if abs(self.timestamp.minute - bar.timestamp.minute) <= 2 and not bar.is_head_down:
-                        #     if bar.low <= self.initial_entry_price - ratio_amount * 1.5:
-                        #         new_sl = bar.high
-                        #         lil_boy = True
-                        #         self.adjust_stop_loss(new_sl, "GOOD GET OUT") if self.stop_loss > new_sl else self.stop_loss
-                            
-                        #     elif(bar.high >= self.initial_entry_price + ratio_amount * 0.6):
-                        #         if bar.is_bullish:
-                        #             new_sl = bar.close
-                                
-                        #         elif bar.is_bearish or bar.is_doji:
-                        #             new_sl = bar.low + bar.range/2
-                                
-                        #         lil_boy = True
-                        #         self.adjust_stop_loss(new_sl, "BAD GET OUT") if self.stop_loss > new_sl else self.stop_loss
-                        
-                        if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_diff and not lil_boy:
-                            new_sl = self.initial_stop_loss - commission_diff
-
-                            if self.stop_loss > new_sl:
-                                self.adjust_stop_loss(new_sl, "Reached commission amount" if not lil_boy else "GET OUT")
-
-                        # 1R favorable movement (price going down)
-                        if not risk_free_1r_applied and bar.low <= self.initial_entry_price - ratio_amount and not lil_boy:
-                            new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_diff
-
-                            if self.stop_loss > new_sl:
-                                self.adjust_stop_loss(new_sl, "1R_favorable" if not lil_boy else "GET OUT")
-                                risk_free_1r_applied = True
-                        
-                        # 2R breakeven
-                        if not risk_free_2r_applied and bar.low <= round(self.initial_entry_price - 2 * ratio_amount, 5):
-                            new_sl = self.initial_entry_price - commission_diff
-
-                            if self.stop_loss > new_sl:
-                                self.adjust_stop_loss(new_sl, "2R_breakeven")
-                                risk_free_2r_applied = True
-                        
-        
-                        if abs(bar.low - self.take_profit) <= 0.20*ratio_amount:
-                            new_sl = bar.low + commission_diff
-                            new_tp = bar.low - 0.25*ratio_amount - commission_diff
-                            self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                            self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
-                        
-
-                        # # Near TP profit locking        
-                        # if abs(bar.low - self.take_profit) <= 0.1 * ratio_amount and bar.low < self.take_profit:
-                        #     new_sl = bar.low + commission_diff
-                        #     new_tp = bar.low - commission_diff*2
-                        #     self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                        #     self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
-                        
-                        if lil_boy == True:
-                            self.lil_boy = True
-
-                    elif self.action == SignalAction.BUY:
-                        
-                        # # GET OUTs
-                        # if abs(self.timestamp.minute - bar.timestamp.minute) <= 2 and not bar.is_head_down:
-                        #     if bar.high >= self.initial_entry_price + ratio_amount * 1.5:
-                        #         new_sl = bar.low
-                        #         lil_boy = True
-                        #         self.adjust_stop_loss(new_sl, "GOOD GET OUT") if self.stop_loss < new_sl else self.stop_loss
-                            
-                        #     elif(bar.low <= self.initial_entry_price - ratio_amount * 0.6):
-                        #         if bar.is_bullish or bar.is_doji:
-                        #             new_sl = bar.high - bar.range/2
-                                
-                        #         elif bar.is_bearish:
-                        #             new_sl = bar.close
-                                
-                        #         lil_boy = True
-                        #         self.adjust_stop_loss(new_sl, "BAD GET OUT") if self.stop_loss < new_sl else self.stop_loss
-                        
-                        # 1R favorable movement (price going up)
-                        if not risk_free_1r_applied and bar.high >= self.initial_entry_price + ratio_amount and not lil_boy:
-                            new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_diff
-                                
-                            if self.stop_loss <= new_sl:
-                                self.adjust_stop_loss(new_sl, "1R_favorable") 
-                                risk_free_1r_applied = True
-                        
-                        # 2R breakeven
-                        if not risk_free_2r_applied and bar.high >= self.initial_entry_price + 2 * ratio_amount:
-                            new_sl = self.initial_entry_price + commission_diff
-
-                            if self.stop_loss <= new_sl:
-                                self.adjust_stop_loss(new_sl, "2R_breakeven")
-                                risk_free_2r_applied = True
-
-
-                        if abs(bar.high - self.take_profit) <= 0.20*ratio_amount:
-                            new_sl = bar.high - commission_diff
-                            new_tp = bar.high + 0.25*ratio_amount + commission_diff
-                            self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
-                            self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
-
-                        # # Near TP profit locking
-                        # if abs(bar.high - self.take_profit) <= 0.1 * ratio_amount or bar.high > self.take_profit:
-                        #     new_sl = bar.high - commission_diff
-                        #     new_tp = bar.high + commission_diff*2
-                        #     self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
-                        #     self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
-
-
-                        if lil_boy == True:
-                            self.lil_boy = True
-
-                elif self.emergency and bar is not None:
-                    first_applied = False
-                    second_applied = False
-
-                    if self.is_sell:
-                        is_65_percent_down = bar.low < self.initial_entry_price - abs(self.initial_entry_price - self.initial_take_profit) * 0.65
-                        if not first_applied and is_65_percent_down:
-                            new_sl = self.initial_stop_loss - commission_diff
-                            self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss > new_sl else self.stop_loss
-                        
-                        if not second_applied and bar.low < self.initial_take_profit:
-                            new_sl = bar.high - commission_diff
-                            self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss > new_sl else self.stop_loss
-
-                    if self.is_buy:
-                        is_65_percent_down = bar.high > self.initial_entry_price + abs(self.initial_entry_price + self.initial_take_profit) * 0.65
-                        if not first_applied and is_65_percent_down:
-                            new_sl = self.initial_stop_loss + commission_diff
-                            self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss < new_sl else self.stop_loss
-                        
-                        if not second_applied and bar.high > self.initial_take_profit:
-                            new_sl = bar.low + commission_diff
-                            self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss < new_sl else self.stop_loss
+                # === STEP 2: APPLY ORDER MANAGEMENT (if any enabled) ===
+                self.online_order_manager(bar, budget)
 
             # If we've processed all current bars without an outcome, try to fetch more
             if fetch_attempts < max_fetch_attempts and not self.is_completed:
@@ -421,133 +277,99 @@ class Signal:
                        total_bars_processed=len([bar for bar in evaluation_bars if bar.timestamp > self.timestamp]),
                        total_fetch_attempts=fetch_attempts)
 
-    
-    # LEGACY RISK-FREE METHOD (Preserved for compatibility)
-    def risk_manager(self, bars_till_now: List['Bar']) -> bool:
+    def online_order_manager(self, bar, budget):
 
-        if not bars_till_now:
-            return False
+        risk_manager = settings.get("strategies.two_hunters.flags.use_risk_manager")
+        commission_manager = settings.get("strategies.two_hunters.flags.use_commission_manager")
+        commission_diff = budget.calculate_commission_diff()
 
-        ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
-        commission_diff = settings.get("trading.commission")
-        risk_free_1r_applied = False
-        risk_free_2r_applied = False
-        lil_boy = False
-        live_bar = bars_till_now.pop()
+        if risk_manager and bar is not None:
+            # Risk-free management setup
+            ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
+            risk_free_1r_applied = False
+            risk_free_2r_applied = False
+            
+            if self.action == SignalAction.SELL:
 
-        for bar in bars_till_now:
-            # === STEP 2: APPLY RISK-FREE MANAGEMENT (if enabled) ===
-            if bar is not None and not self.emergency:
-                # Risk-free management setup
-                ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
-                risk_free_1r_applied = False
-                risk_free_2r_applied = False
-                lil_boy = False
+                # Cover Commission amount
+                if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_diff:
+                    new_sl = self.initial_stop_loss - commission_diff
+
+                    if self.stop_loss > new_sl:
+                        self.adjust_stop_loss(new_sl, "Reached commission amount")
+
+                # 1R favorable movement (price going down)
+                if not risk_free_1r_applied and bar.low <= self.initial_entry_price - ratio_amount:
+                    new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_diff
+
+                    if self.stop_loss > new_sl:
+                        self.adjust_stop_loss(new_sl, "1R_favorable")
+                        risk_free_1r_applied = True
                 
-                if self.action == SignalAction.SELL:
+                # 2R breakeven
+                if not risk_free_2r_applied and bar.low <= round(self.initial_entry_price - 2 * ratio_amount, 5):
+                    new_sl = self.initial_entry_price - commission_diff
 
-                    # Adjust for commission
-                    if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_diff and not lil_boy:
-                        new_sl = self.initial_stop_loss - commission_diff
+                    if self.stop_loss > new_sl:
+                        self.adjust_stop_loss(new_sl, "2R_breakeven")
+                        risk_free_2r_applied = True
+                
 
-                        if self.stop_loss > new_sl:
-                            self.adjust_stop_loss(new_sl, "Reached commission amount" if not lil_boy else "GET OUT")
+                if abs(bar.low - self.take_profit) <= 0.20*ratio_amount:
+                    new_sl = bar.low + commission_diff
+                    new_tp = bar.low - 0.25*ratio_amount - commission_diff
+                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
+            
+            elif self.action == SignalAction.BUY:
 
-                    # 1R favorable
-                    if not risk_free_1r_applied and bar.low <= self.initial_entry_price - ratio_amount and not lil_boy:
-                        new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_diff
+                # Cover Commission amount
+                if not risk_free_1r_applied and bar.high >= self.initial_entry_price + commission_diff:
+                    new_sl = self.initial_stop_loss + commission_diff
 
-                        if self.stop_loss > new_sl:
-                            self.adjust_stop_loss(new_sl, "1R_favorable" if not lil_boy else "GET OUT")
-                            risk_free_1r_applied = True
-                    
-                    # 2R breakeven
-                    if not risk_free_2r_applied and bar.low <= round(self.initial_entry_price - 2 * ratio_amount, 5):
-                        new_sl = self.initial_entry_price - commission_diff
+                    if self.stop_loss < new_sl:
+                        self.adjust_stop_loss(new_sl, "Reached commission amount")
 
-                        if self.stop_loss > new_sl:
-                            self.adjust_stop_loss(new_sl, "2R_breakeven")
-                            risk_free_2r_applied = True
-                    
-                    # Near 3R
-                    if abs(bar.low - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = bar.low + commission_diff
-                        new_tp = bar.low - 0.25*ratio_amount - commission_diff
-                        self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                        self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
+                # 1R favorable movement (price going up)
+                if not risk_free_1r_applied and bar.high >= self.initial_entry_price + ratio_amount:
+                    new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_diff
                         
-                    elif abs(live_bar.low - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = live_bar.low + commission_diff
-                        new_tp = live_bar.low - 0.25*ratio_amount - commission_diff
-                        self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                        self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
+                    if self.stop_loss <= new_sl:
+                        self.adjust_stop_loss(new_sl, "1R_favorable") 
+                        risk_free_1r_applied = True
+                
+                # 2R breakeven
+                if not risk_free_2r_applied and bar.high >= self.initial_entry_price + 2 * ratio_amount:
+                    new_sl = self.initial_entry_price + commission_diff
 
-                    if lil_boy == True:
-                        self.lil_boy = True
-
-                elif self.action == SignalAction.BUY:
-
-                    # Adjust for commission
-                    if not risk_free_1r_applied and bar.high >= self.initial_entry_price + commission_diff and not lil_boy:
-                        new_sl = self.initial_stop_loss + commission_diff
-
-                        if self.stop_loss < new_sl:
-                            self.adjust_stop_loss(new_sl, "Reached commission amount" if not lil_boy else "GET OUT")
+                    if self.stop_loss <= new_sl:
+                        self.adjust_stop_loss(new_sl, "2R_breakeven")
+                        risk_free_2r_applied = True
 
 
-                    # 1R favorable
-                    if not risk_free_1r_applied and bar.high >= self.initial_entry_price + ratio_amount and not lil_boy:
-                        new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_diff
-                            
-                        if self.stop_loss <= new_sl:
-                            self.adjust_stop_loss(new_sl, "1R_favorable") 
-                            risk_free_1r_applied = True
-                    
-                    # 2R breakeven
-                    if not risk_free_2r_applied and bar.high >= self.initial_entry_price + 2 * ratio_amount:
-                        new_sl = self.initial_entry_price + commission_diff
+                if abs(bar.high - self.take_profit) <= 0.20*ratio_amount:
+                    new_sl = bar.high - commission_diff
+                    new_tp = bar.high + 0.25*ratio_amount + commission_diff
+                    self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
 
-                        if self.stop_loss <= new_sl:
-                            self.adjust_stop_loss(new_sl, "2R_breakeven")
-                            risk_free_2r_applied = True
+        elif commission_manager and bar is not None:
+            # Cover Commission amount
+            if self.action == SignalAction.SELL:
+                if bar.low <= self.initial_entry_price - commission_diff*2:
+                    new_sl = self.initial_stop_loss - commission_diff
 
+                    if self.stop_loss > new_sl:
+                        self.adjust_stop_loss(new_sl, "Covered commission amount")
 
-                    if abs(bar.high - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = bar.high - commission_diff
-                        new_tp = bar.high + 0.25*ratio_amount + commission_diff
-                        self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
-                        self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
+            # Cover Commission amount
+            elif self.action == SignalAction.BUY:
+                if bar.high >= self.initial_entry_price + commission_diff*2:
+                    new_sl = self.initial_stop_loss + commission_diff
 
-                    if abs(live_bar.high - self.take_profit) <= 0.20*ratio_amount:
-                        new_sl = live_bar.high - commission_diff
-                        new_tp = live_bar.high + 0.25*ratio_amount + commission_diff
-                        self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
-                        self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
+                    if self.stop_loss < new_sl:
+                        self.adjust_stop_loss(new_sl, "Covered commission amount")
 
-            elif self.emergency and bar is not None:
-                first_applied = False
-                second_applied = False
-
-                if self.is_sell:
-                    is_65_percent_down = live_bar.low < self.initial_entry_price - abs(self.initial_entry_price - self.initial_take_profit) * 0.65
-                    if not first_applied and is_65_percent_down:
-                        new_sl = self.initial_stop_loss - commission_diff
-                        self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss > new_sl else self.stop_loss
-                    
-                    if not second_applied and live_bar.low < self.initial_take_profit:
-                        new_sl = live_bar.high - commission_diff
-                        self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss > new_sl else self.stop_loss
-
-                if self.is_buy:
-                    is_65_percent_down = live_bar.high > self.initial_entry_price + abs(self.initial_entry_price + self.initial_take_profit) * 0.65
-                    if not first_applied and is_65_percent_down:
-                        new_sl = self.initial_stop_loss + commission_diff
-                        self.adjust_stop_loss(new_sl, "Passed old tp") if self.stop_loss < new_sl else self.stop_loss
-                    
-                    if not second_applied and live_bar.high > self.initial_take_profit:
-                        new_sl = live_bar.low + commission_diff
-                        self.adjust_stop_loss(new_sl, f"Passed 65% old tp") if self.stop_loss < new_sl else self.stop_loss
-    
     # BINARY OPTION ANALYSIS (Preserved)
     def binary_option(signals: List, length: int = 60) -> List[int]:
         """Binary option success rate analysis"""
@@ -579,31 +401,53 @@ class Signal:
     def to_dict(self) -> dict:
         """Convert signal to dictionary representation"""
         return {
-            'action': self.action.value,
-            'symbol': self.symbol,
-            'timestamp': self.timestamp.isoformat(),
-            'signal_type': self.signal_type.value,
-            'entry_price': self.entry_price,
-            'stop_loss': self.stop_loss,
-            'take_profit': self.take_profit,
-            'initial_entry_price': self.initial_entry_price,
-            'initial_stop_loss': self.initial_stop_loss,
-            'initial_take_profit': self.initial_take_profit,
-            'entry_lot': self.entry_lot,
-            'stop_loss_pips': self.stop_loss_pips,
-            'take_profit_pips': self.take_profit_pips,
-            'outcome': self.outcome.value if self.outcome else None,
-            'outcome_timestamp': self.outcome_timestamp.isoformat() if self.outcome_timestamp else None,
-            'is_complete': self.is_completed,
-            'is_pending': self.is_pending,
-            'gain': self.gain,
-            'ticket': self.ticket,
-            'trend': self.trend,
-            'fake_CHoCH': self.fake_CHoCH,
-            'time_flag': self.time_flag,
-            'risk_free_activated': True if self.sl_adjusted_count > 0 else False,
-            'sl_adjusted_count': self.sl_adjusted_count
+            # Core signal data
+            "action": self.action.value,
+            "symbol": self.symbol,
+            "timestamp": self.timestamp.isoformat(),
+            "signal_type": self.signal_type.value,
+            
+            # Price levels
+            "entry_price": self.entry_price,
+            "stop_loss": self.stop_loss,
+            "take_profit": self.take_profit,
+            
+            # Initial values (for risk-free tracking)
+            "initial_entry_price": self.initial_entry_price,
+            "initial_stop_loss": self.initial_stop_loss,
+            "initial_take_profit": self.initial_take_profit,
+            
+            # Position sizing and metrics
+            "entry_lot": self.entry_lot,
+            "stop_loss_pips": self.stop_loss_pips,
+            "take_profit_pips": self.take_profit_pips,
+            
+            # Outcome tracking
+            "outcome": self.outcome.value if self.outcome else None,
+            "outcome_timestamp": self.outcome_timestamp.isoformat() if self.outcome_timestamp else None,
+            "exit_pips": self.exit_pips,
+            "exit_price": self.exit_price,
+            "gain": self.gain,
+            
+            # Order execution details
+            "ticket": self.ticket,
+            "commission": self.commission,
+            
+            # Strategy flags and metadata
+            "trend": self.trend,
+            "fake_CHoCH": self.fake_CHoCH,
+            "time_flag": self.time_flag,
+            "used_flag": self.used_flag,
+            
+            # Risk management tracking
+            "sl_adjusted_count": self.sl_adjusted_count,
+            
+            # Computed properties (for convenience)
+            "is_complete": self.is_completed,
+            "is_pending": self.is_pending,
+            "risk_free_activated": True if self.sl_adjusted_count > 0 else False,
         }
+
     
     def __repr__(self):
         outcome_str = f" {self.outcome.value.upper()}" if self.outcome else " PENDING"

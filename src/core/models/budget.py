@@ -215,9 +215,6 @@ class Budget:
         dif = settings.get("trading.commission") / self.lot_size
         return dif
 
-    def calculate_commission_value_per_lot(self):
-        ...
-
     def lots_from_diff(self, symbol: str, sl_distance: float) -> float:
         """
         Calculate position size based on RISK_AMOUNT - THE CORE METHOD
