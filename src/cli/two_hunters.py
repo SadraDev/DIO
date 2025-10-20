@@ -89,7 +89,6 @@ def backtest(ctx, symbol, start_date, end_date,
     from src.core.models.budget import Budget
     from config.settings import settings
 
-    if risk is not None: risk /= 100
     settings.set("trading.commission", commission) if commission is not None else None
     settings.set("strategies.two_hunters.flags.use_trend_flag", use_trend_flag)
     settings.set("strategies.two_hunters.flags.use_risk_manager", use_risk_manager)
@@ -113,7 +112,7 @@ def backtest(ctx, symbol, start_date, end_date,
     
     balance = balance or settings.initial_balance
     risk = risk or settings.default_risk_percent
-    
+
     if not ctx.obj['quiet']:
         click.echo(f"Starting backtest with {', '.join(symbols)}")
         click.echo(f"Period: {start_date.date()} to {end_date.date()}")

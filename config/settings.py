@@ -137,7 +137,7 @@ class Settings:
     # Convenience methods for common configuration access
     @property
     def system_name(self) -> str:
-        return self.get('system.name', 'Trading System')
+        return self.get('system.name', 'DIO')
     
     @property
     def system_version(self) -> str:
@@ -149,7 +149,7 @@ class Settings:
     
     @property
     def symbols(self) -> list:
-        return self.get('market.symbols', ['EURUSD.', 'GBPUSD.'])
+        return self.get('trading.symbols', ['EURUSD.', 'GBPUSD.'])
     
     @property
     def initial_balance(self) -> float:
@@ -157,7 +157,7 @@ class Settings:
     
     @property
     def default_risk_percent(self) -> float:
-        return self.get('trading.risk.default_risk_percent', 0.01)
+        return self.get('account.default_risk_percent', 0.01)
     
     @property
     def max_signals_per_symbol(self) -> int:
