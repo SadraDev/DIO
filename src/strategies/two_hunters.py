@@ -193,7 +193,6 @@ class TwoHuntersStrategy():
             before_bar = after_bar = signal_bar
         
         entry_price = signal_bar.close
-        commission = self.budget.calculate_commission_diff()
         
         # Fair Value Gap (FVG) logic
         min_fvg, max_fvg = self.fvg_range
@@ -218,7 +217,7 @@ class TwoHuntersStrategy():
             entry_price = signal_bar.close
             diff = abs(extrema - entry_price)
             stop_loss = self.ratios["stop_loss"] * (extrema + (diff*self.margin_pips))
-            take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss) - commission
+            take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss)
         
         elif action == SignalAction.BUY:
             # Check for bullish FVG
@@ -232,7 +231,7 @@ class TwoHuntersStrategy():
             entry_price = signal_bar.close
             diff = abs(extrema - entry_price)
             stop_loss = self.ratios["stop_loss"] * (extrema - (diff*self.margin_pips))
-            take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss) + commission
+            take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss)
         
         self.logger.debug(f"Entry calculation: EP={entry_price:.5f}, SL={stop_loss:.5f}, TP={take_profit:.5f}")
         return entry_price, stop_loss, take_profit
@@ -280,18 +279,16 @@ class TwoHuntersStrategy():
         violations = []
         
         if self.use_trend_flag and signal.trend:
-            signal.used_flag = True
             violations.append("trend_flag")
         
         if self.use_time_flag and signal.time_flag:
-            signal.used_flag = True
             violations.append("time_flag")
         
         if self.use_choch_flag and not signal.fake_CHoCH:
-            signal.used_flag = True
             violations.append("choch_flag")
 
         if violations:
+            signal.used_flag = True
             self.logger.debug(f"Signal rejected by flags: {violations}")
             return False
         
@@ -319,10 +316,11 @@ class TwoHuntersStrategy():
             )
         else:
             self.breakout_engine.num_hunt = self.config.get("breakout.num_hunt_recovery", 1)
-            mbox_bars.extend([bar for bar in session_bars if bar.timestamp <= faild_signal.outcome_timestamp])
+            outcome_timestamp = faild_signal.outcome_timestamp - timedelta(minutes=1)
+            mbox_bars.extend([bar for bar in session_bars if bar.timestamp <= outcome_timestamp])
             mbox_result = self.mbox_analyzer.calculate(mbox_bars)
             
-            recovery_bars = [bar for bar in session_bars if bar.timestamp > faild_signal.outcome_timestamp]
+            recovery_bars = [bar for bar in session_bars if bar.timestamp >= outcome_timestamp]
 
             extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.calculate(
                 recovery_bars, mbox_result
@@ -364,7 +362,51 @@ class TwoHuntersStrategy():
         self.budget.update_risk_percent(signal)
         signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
-        signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
+
+        # Commission amount
+        commission = settings.get("trading.commission")
+        use_offline_commission_manager = settings.get("strategies.two_hunters.flags.use_offline_commission_manager")
+        use_large_slp_flag = settings.get("strategies.two_hunters.flags.use_large_slp_flag")
+        use_2R_for_EUR = settings.get("strategies.two_hunters.flags.use_2r_for_eur")
+        onhand_lot_size = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
+
+        if not use_offline_commission_manager:
+            signal.entry_lot = onhand_lot_size
+        else:
+            commission_amount = onhand_lot_size * commission
+            risk_dollars = self.budget.risk_amount() - commission_amount
+            signal.entry_lot = self.budget.lots_from_diff_and_risk_amount(signal.symbol, abs(signal.entry_price - signal.stop_loss), risk_dollars)
+
+        if use_2R_for_EUR and signal.symbol == "EURUSD.":
+            if signal.is_buy:
+                _2r_top = signal.entry_price + abs(signal.entry_price - signal.stop_loss) * 2
+                signal.initial_take_profit = _2r_top
+                signal.take_profit = _2r_top
+                signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+                
+            if signal.is_sell:
+                _2r_top = signal.entry_price - abs(signal.entry_price - signal.stop_loss) * 2
+                signal.initial_take_profit = _2r_top
+                signal.take_profit = _2r_top
+                signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+
+        if use_large_slp_flag:
+            magic_number = settings.get("strategies.two_hunters.flags.large_slp_magic_number")
+            magic_number = magic_number + self.get_magic_number_plusser(signal.symbol)
+            condition = signal.stop_loss_pips / signal.entry_lot >= magic_number
+
+            if condition:
+                if signal.is_buy:
+                    _2r_top = signal.entry_price + abs(signal.entry_price - signal.stop_loss) * 2
+                    signal.initial_take_profit = _2r_top
+                    signal.take_profit = _2r_top
+                    signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+                    
+                if signal.is_sell:
+                    _2r_top = signal.entry_price - abs(signal.entry_price - signal.stop_loss) * 2
+                    signal.initial_take_profit = _2r_top
+                    signal.take_profit = _2r_top
+                    signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
 
         # Log signal generation
         log_signal_event(
@@ -913,6 +955,22 @@ class TwoHuntersStrategy():
             goodtimes.sleep(min(0.5, end_time - goodtimes.time()))  # Check every 0.5 seconds
         return True  # Completed sleep
 
+    def get_magic_number_plusser(self, symbol):
+        if symbol is None:
+            return 0
+        
+        clean_symbol = symbol.rstrip('.').upper()
+
+        # JPY pairs (0.01 pip)
+        args = [
+            'USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY',
+            'NZDJPY', 'CADJPY', 'CHFJPY',
+        ]
+
+        if clean_symbol in args:
+            return 10
+        else:
+            return 1
 
 import signal
 class GracefulKiller:

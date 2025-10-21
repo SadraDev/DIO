@@ -1,0 +1,4 @@
+2025-10-21 21:15:25,030 | trading | INFO | __init__:87 | TwoHunters strategy initialized:
+2025-10-21 21:15:25,031 | trading | INFO | __init__:88 | MBox Hours: 04:30:00 - 12:30:00
+2025-10-21 21:15:25,031 | trading | INFO | __init__:89 | Session Hours: 2
+2025-10-21 21:15:25,665 | trading | INFO | backtest:502 | Fetching data for ['GBPUSD.', 'EURUSD.'] from 2025-01-01 00:00:00 to 2025-10-21 00:00:00

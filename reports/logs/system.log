@@ -1,0 +1,2 @@
+2025-10-21 21:15:24,820 | system | INFO | initialize:47 | Logging system initialized successfully
+2025-10-21 21:15:25,665 | system | INFO | log_system_event:236 | SYSTEM_EVENT | event_type=backtest_started | symbols=['GBPUSD.', 'EURUSD.'] | start_date=2025-01-01T00:00:00 | end_date=2025-10-21T00:00:00 | initial_balance=10000

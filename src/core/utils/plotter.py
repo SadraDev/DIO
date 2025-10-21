@@ -631,7 +631,7 @@ class TradingPlotter:
             longest_uw = max(longest_uw, last_ts - current_uw_start)
 
         return {
-            'total_signals': len(all_signals),
+            'total_signals': len(usable),
             'total_wins': len(wins),
             'total_losses': len(losses),
             'overall_win_rate': (len(wins) / len(usable)) * 100 if usable else 0.0,
@@ -644,7 +644,7 @@ class TradingPlotter:
             'total_win_amount': sum(win_gains) if win_gains else 0.0,
             'total_loss_amount': sum(loss_gains) if loss_gains else 0.0,
             'profit_factor': (abs(sum(win_gains) / sum(loss_gains)) if loss_gains and sum(loss_gains) != 0 else float('inf')),
-            'signals': signals_sorted,
+            'signals': all_signals,
 
             # New fields:
             'drawdown_abs': max_dd_abs,             # currency units
@@ -760,7 +760,7 @@ class TradingPlotter:
         
         fig.update_layout(
             title={
-                'text': f'DrawDown: {round(abs_value, 1)}$    -    DraDown pct: {round(pct, 2)}%    -    UnderWater Time: {uwt.days} days',
+                'text': f'DrawDown: {round(abs_value, 1)}$    -    DrawDown pct: {round(pct, 2)}%    -    UnderWater Time: {uwt.days} days',
                 'x': 0.5,
                 'xanchor': 'right'
             },
@@ -800,7 +800,10 @@ class TradingPlotter:
         risk = settings.get("account.default_risk_percent")
         use_trend_flag = settings.get("strategies.two_hunters.flags.use_trend_flag")
         use_risk_manager = settings.get("strategies.two_hunters.flags.use_risk_manager")
-        use_commission_manager = settings.get("strategies.two_hunters.flags.use_commission_manager")
+        use_online_commission_manager = settings.get("strategies.two_hunters.flags.use_online_commission_manager")
+        use_offline_commission_manager = settings.get("strategies.two_hunters.flags.use_offline_commission_manager")
+        use_2R_for_EUR = settings.get("strategies.two_hunters.flags.use_2r_for_eur")
+        use_large_slp_flag = settings.get("strategies.two_hunters.flags.use_large_slp_flag")
         use_time_flag = settings.get("strategies.two_hunters.flags.use_time_flag")
         balance = settings.get("account.initial_balance")
 
@@ -846,12 +849,33 @@ class TradingPlotter:
             use_risk_manager,
             "🛡️"
         )
+        
+        _2R_for_EUR_str = create_badge(
+            "1:2R for EUR",
+            "ACTIVE" if use_2R_for_EUR else "INACTIVE",
+            use_2R_for_EUR,
+            "💱"
+        )
 
-        commission_mgr_badge = create_badge(
-            "Commission Manager",
-            "ACTIVE" if use_commission_manager else "INACTIVE",
-            use_commission_manager,
+        online_commission_mgr_badge = create_badge(
+            "On-Comm Manager",
+            "ACTIVE" if use_online_commission_manager else "INACTIVE",
+            use_online_commission_manager,
             "💲"
+        )
+
+        offline_commission_mgr_badge = create_badge(
+            "Off-Comm Manager",
+            "ACTIVE" if use_offline_commission_manager else "INACTIVE",
+            use_offline_commission_manager,
+            "🧾"
+        )
+
+        large_slp_str = create_badge(
+            "Large SLP Manager",
+            "ACTIVE" if use_large_slp_flag else "INACTIVE",
+            use_large_slp_flag,
+            "🛠️"
         )
 
         return f"""
@@ -894,7 +918,10 @@ class TradingPlotter:
                     {trend_badge}
                     {time_badge}
                     {risk_mgr_badge}
-                    {commission_mgr_badge}
+                    {_2R_for_EUR_str}
+                    {online_commission_mgr_badge}
+                    {offline_commission_mgr_badge}
+                    {large_slp_str}
                 </div>
             </div>
         </div>

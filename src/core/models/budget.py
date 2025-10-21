@@ -238,7 +238,7 @@ class Budget:
         
         # Calculate stop loss distance in pips
         sl_distance_pips = self.pips_from_diff(sl_distance)
-        
+
         if sl_distance_pips < 0:
             raise ValueError("Stop loss distance must be greater than 0")
         
@@ -246,14 +246,31 @@ class Budget:
         pip_value_per_lot = self.calculate_pip_value(symbol)
         
         # CORE CALCULATION: Risk Amount / (SL Pips × Pip Value) = Lot Size
-        risk_dollars = self.risk_amount()
-        lot_size = risk_dollars / (sl_distance_pips * pip_value_per_lot) if sl_distance_pips != 0 else 0
-        
+        lot_size = self.risk_amount() / (sl_distance_pips * pip_value_per_lot) if sl_distance_pips != 0 else 0
+          
         # Round to minimum lot size and apply limits
         lot_size = max(round(lot_size, 2), self.min_lot_size)
         lot_size = min(lot_size, 10.0)  # Max 10 lots
         return lot_size
     
+    def lots_from_diff_and_risk_amount(self, symbol: str, sl_distance: float, risk_amount: float):
+        # Calculate stop loss distance in pips
+        sl_distance_pips = self.pips_from_diff(sl_distance)
+
+        if sl_distance_pips < 0:
+            raise ValueError("Stop loss distance must be greater than 0")
+        
+        # Get pip value for 1 lot
+        pip_value_per_lot = self.calculate_pip_value(symbol)
+        
+        # CORE CALCULATION: Risk Amount / (SL Pips × Pip Value) = Lot Size
+        lot_size = risk_amount / (sl_distance_pips * pip_value_per_lot) if sl_distance_pips != 0 else 0
+          
+        # Round to minimum lot size and apply limits
+        lot_size = max(round(lot_size, 2), self.min_lot_size)
+        lot_size = min(lot_size, 10.0)  # Max 10 lots
+        return lot_size
+
     def calculate_gain_loss(self, symbol: str, entry_price: float, exit_price: float, 
                            lot_size: float, action: str) -> float:
         """

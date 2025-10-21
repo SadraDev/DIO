@@ -18,7 +18,7 @@ account:
 
 # Trading Configuration
 trading:
-  commission: 5
+  commission: 7
   symbols: ["EURUSD.", "GBPUSD."]
   max_signals_per_symbol: 2
   risk:
@@ -53,7 +53,7 @@ data:
 # Strategy Configurations
 strategies:
   two_hunters:
-    margin_pips: 0.01
+    margin_pips: 0.02
     fvg:
       min_size_pips: 1.0
       max_size_pips: 3.0
@@ -79,13 +79,17 @@ strategies:
       volume_factor: 1.2
     flags:
       use_risk_manager: false
-      use_commission_manager: false
+      use_2r_for_eur: false
+      use_online_commission_manager: false
+      use_offline_commission_manager: false
+      use_large_slp_flag: false
       use_trading_hours: false
       use_all_flags: false
       use_trend_flag: false
       use_time_flag: false
       use_choch_flag: false
       time_flag_hour: "10:30"
+      large_slp_magic_number: 6
     backtesting:
       default_start: "2001-09-11"
       default_end: "2001-09-12"

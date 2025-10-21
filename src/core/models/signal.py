@@ -174,7 +174,10 @@ class Signal:
             # SINGLE LOOP: Process bars chronologically  
             for bar in evaluation_bars:
 
-                # === STEP 1: CHECK FOR TP/SL HITS ===
+                # === STEP 1: APPLY ORDER MANAGEMENT (if any enabled) ===
+                self.online_order_manager(bar, budget)
+
+                # === STEP 2: CHECK FOR TP/SL HITS ===
                 if self.action == SignalAction.SELL:
                     # Take Profit hit (price going down)
                     if bar.low <= self.take_profit:
@@ -258,9 +261,6 @@ class Signal:
                     self.gain -= self.commission
                     break
 
-                # === STEP 2: APPLY ORDER MANAGEMENT (if any enabled) ===
-                self.online_order_manager(bar, budget)
-
             # If we've processed all current bars without an outcome, try to fetch more
             if fetch_attempts < max_fetch_attempts and not self.is_completed:
                 log_signal_event("signal_not_resolved", self.symbol, self.action.value,
@@ -278,17 +278,18 @@ class Signal:
                        total_fetch_attempts=fetch_attempts)
 
     def online_order_manager(self, bar, budget):
-
         risk_manager = settings.get("strategies.two_hunters.flags.use_risk_manager")
-        commission_manager = settings.get("strategies.two_hunters.flags.use_commission_manager")
+        use_online_commission_manager = settings.get("strategies.two_hunters.flags.use_online_commission_manager")
+        use_offline_commission_manager = settings.get("strategies.two_hunters.flags.use_offline_commission_manager")
         commission_diff = budget.calculate_commission_diff()
+        ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
 
         if risk_manager and bar is not None:
             # Risk-free management setup
-            ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
             risk_free_1r_applied = False
             risk_free_2r_applied = False
-            
+            risk_free_3r_applied = False
+
             if self.action == SignalAction.SELL:
 
                 # Cover Commission amount
@@ -314,13 +315,21 @@ class Signal:
                         self.adjust_stop_loss(new_sl, "2R_breakeven")
                         risk_free_2r_applied = True
                 
-
-                if abs(bar.low - self.take_profit) <= 0.20*ratio_amount:
-                    new_sl = bar.low + commission_diff
+                # Near 3R lock
+                if abs(bar.low - self.initial_take_profit) <= 0.10*ratio_amount and not risk_free_3r_applied:
+                    new_sl = self.initial_entry_price - 0.90*(3*ratio_amount) - commission_diff
                     new_tp = bar.low - 0.25*ratio_amount - commission_diff
                     self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
                     self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
-            
+                    risk_free_3r_applied = True
+
+                # Post 3R movement
+                if abs(bar.low - self.take_profit) <= 0.10*ratio_amount and risk_free_3r_applied:
+                    new_sl = bar.high + 0.10*ratio_amount - commission_diff
+                    new_tp = bar.low - 0.25*ratio_amount - commission_diff
+                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "Post 3R movement") if self.stop_loss > new_sl else self.stop_loss
+
             elif self.action == SignalAction.BUY:
 
                 # Cover Commission amount
@@ -346,29 +355,59 @@ class Signal:
                         self.adjust_stop_loss(new_sl, "2R_breakeven")
                         risk_free_2r_applied = True
 
+                # Near 3R lock
+                if abs(bar.high - self.take_profit) <= 0.10*ratio_amount:
+                    new_sl = self.initial_entry_price + 0.95*(3*ratio_amount) + commission_diff
+                    new_tp = bar.high + 0.25*ratio_amount + commission_diff
+                    self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
+                    risk_free_3r_applied = True
 
-                if abs(bar.high - self.take_profit) <= 0.20*ratio_amount:
-                    new_sl = bar.high - commission_diff
+                # Post 3R movement
+                if abs(bar.high - self.take_profit) <= 0.10*ratio_amount and not risk_free_3r_applied:
+                    new_sl = bar.low - 0.10*ratio_amount + commission_diff
                     new_tp = bar.high + 0.25*ratio_amount + commission_diff
                     self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
                     self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
 
-        elif commission_manager and bar is not None:
+        elif use_online_commission_manager and bar is not None:
             # Cover Commission amount
             if self.action == SignalAction.SELL:
                 if bar.low <= self.initial_entry_price - commission_diff*2:
                     new_sl = self.initial_stop_loss - commission_diff
-
-                    if self.stop_loss > new_sl:
-                        self.adjust_stop_loss(new_sl, "Covered commission amount")
+                    new_tp = self.initial_take_profit - commission_diff
+                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "Covered commission amount") if self.stop_loss > new_sl else self.stop_loss
 
             # Cover Commission amount
             elif self.action == SignalAction.BUY:
                 if bar.high >= self.initial_entry_price + commission_diff*2:
                     new_sl = self.initial_stop_loss + commission_diff
+                    new_tp = self.initial_take_profit + commission_diff
+                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "Covered commission amount") if self.stop_loss < new_sl else self.stop_loss
 
-                    if self.stop_loss < new_sl:
-                        self.adjust_stop_loss(new_sl, "Covered commission amount")
+        elif use_offline_commission_manager and bar is not None:
+            # Cover Commission amount
+            commission_per_lot = settings.get("trading.commission")
+            commission_amount = budget.lots_from_diff(self.symbol, abs(self.initial_entry_price - self.initial_stop_loss)) * commission_per_lot
+            diff = (3*commission_amount / budget.calculate_pip_value(self.symbol)) * budget.pip_size
+
+            if self.action == SignalAction.SELL:
+                if abs(bar.low - self.initial_take_profit) <= 0.50*ratio_amount:
+                    new_sl = self.initial_entry_price - 0.95*(3*ratio_amount)
+                    new_tp = self.initial_take_profit - diff
+                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "near_tp_commission_adjustment") if self.stop_loss > new_sl else self.stop_loss
+
+            # Cover Commission amount
+            elif self.action == SignalAction.BUY:
+                if abs(bar.high - self.initial_take_profit) <= 0.10*ratio_amount:
+                    new_sl = self.initial_entry_price + 0.95*(3*ratio_amount) + commission_diff
+                    new_tp = self.initial_take_profit + diff
+                    self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
+                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
+
 
     # BINARY OPTION ANALYSIS (Preserved)
     def binary_option(signals: List, length: int = 60) -> List[int]:
