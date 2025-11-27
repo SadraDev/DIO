@@ -57,6 +57,8 @@ def two_hunters_cli(ctx, config, verbose, quiet):
               help='Show trading signals on charts.')
 @click.option('--no-mbox', is_flag=True, default=False,
               help='Highlight trading mbox on charts.')
+@click.option('--show-15m-bars', is_flag=True, default=False,
+              help='Show 15m bars on 1m charts.')
 @click.option('--no-reports', is_flag=True, default=False,
               help='Skip report generation (backtest only).')
 @click.option('--no-plots', is_flag=True, default=False,
@@ -68,7 +70,7 @@ def two_hunters_cli(ctx, config, verbose, quiet):
 @click.option('--use-large-slp-flag', is_flag=True, default=False,
               help='If the Stop loss pips are large relative to lot size, switch to 1:2 ratio.')
 @click.option('--use-2r-for-eur', is_flag=True, default=False,
-              help='If enabled, uses 1:2 ratio for EURUSD.')
+              help='If active, uses 1:2 ratio for EURUSD.')
 @click.option('--use-time-flag', is_flag=True, default=False,
               help='If the Mbox has extrema after 12, no signal will be generated.')
 @click.option('--use-risk-manager', is_flag=True, default=False,
@@ -77,7 +79,7 @@ def two_hunters_cli(ctx, config, verbose, quiet):
               help='Cover commission cost by adjusting SL.')
 @click.option('--use-offline-commission-manager', is_flag=True, default=False,
               help='Cover commission cost by adjusting Lot size.')
-
+ 
 # VALUES
 @click.option('--commission', type=float, default=None,
               help='Commission amount per lot.')
@@ -86,7 +88,7 @@ def two_hunters_cli(ctx, config, verbose, quiet):
 @click.option('--risk', '-r', type=float, default=None,
               help='Risk percentage per trade (e.g., 0.005 for 0.5%).')
 @click.pass_context
-def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox, 
+def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox, show_15m_bars,
              no_reports, no_plots, use_trend_flag, use_large_slp_flag, use_2r_for_eur,
              use_time_flag, use_risk_manager, use_online_commission_manager,
              use_offline_commission_manager, commission, balance, risk):
@@ -125,19 +127,19 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
     risk = risk or settings.default_risk_percent
 
     if not ctx.obj['quiet']:
-        click.echo(f"Starting backtest with {', '.join(symbols)}")
-        click.echo(f"Period: {start_date.date()} to {end_date.date()}")
-        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%}")
-        click.echo(f"Balance: ${balance:,} | Risk: {risk:.1%}")
+        click.echo(f"Starting backtest with          {', '.join(symbols)}")
+        click.echo(f"Period:                         {start_date.date()} to {end_date.date()}")
+        click.echo(f"Balance:                        ${balance:,} | Risk: {risk:.1%}")
         click.echo(f"Flags:")
-        click.echo(f"   Risk Manager: {'Enabled' if use_risk_manager else 'Disabled'}")
-        click.echo(f"   2R for EURUSD: {'Enabled' if use_2r_for_eur else 'Disabled'}")
-        click.echo(f"   Online Commission Manager: {'Enabled' if use_online_commission_manager else 'Disabled'}")
-        click.echo(f"   Offline Commission Manager: {'Enabled' if use_offline_commission_manager else 'Disabled'}")
-        click.echo(f"   Charts: {'Enabled' if not no_plots else 'Disabled'}")
-        click.echo(f"      Show Mbox: {'Enabled' if not no_mbox else 'Disabled'}") if not no_plots else None
-        click.echo(f"      Show Signals: {'Enabled' if not no_signals else 'Disabled'}") if not no_plots else None
-        click.echo(f"   Reports: {'Enabled' if not no_reports else 'Disabled'}")
+        click.echo(f"    Risk Manager:               {'-Active' if use_risk_manager else '-DeActive'}")
+        click.echo(f"    2R for EURUSD:              {'-Active' if use_2r_for_eur else '-DeActive'}")
+        click.echo(f"    Online Commission Manager:  {'-Active' if use_online_commission_manager else '-DeActive'}")
+        click.echo(f"    Offline Commission Manager: {'-Active' if use_offline_commission_manager else '-DeActive'}")
+        click.echo(f"    Reports:                    {'-Active' if not no_reports else '-DeActive'}")
+        click.echo(f"    Charts:                     {'-Active' if not no_plots else '-DeActive'}")
+        click.echo(f"        Show Mbox:                  {'-Active' if not no_mbox else '-DeActive'}") if not no_plots else None
+        click.echo(f"        Show Positions:             {'-Active' if not no_signals else '-DeActive'}") if not no_plots else None
+        click.echo(f"        Show 15M candles:           {'-Active' if show_15m_bars else '-DeActive'}") if show_15m_bars else None
     
     try:
         results = twohunters.backtest(
@@ -145,13 +147,13 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
             start_date=start_date,
             end_date=end_date,
             output_dir=output_dir,
-            use_risk_manager=use_risk_manager,
             verbose=ctx.obj['verbose'],
-            # Plotting parameters (only if not disabled)
+            # Plotting parameters (only if not Active)
             no_reports=no_reports,
             no_plots=no_plots,
             no_signals=no_signals,
             no_mbox=no_mbox,
+            show_15m_bars=show_15m_bars
         )
         
         if not ctx.obj['quiet']:

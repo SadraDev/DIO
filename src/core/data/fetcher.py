@@ -70,8 +70,21 @@ class DataFetcher:
         self._ensure_connection()
 
         try:
-            # Pull raw ticks for the interval (both info and trade ticks)
-            ticks = mt5.copy_ticks_range(symbol, start_dt, end_dt, mt5.COPY_TICKS_ALL)
+            # GET TIMEZONE OFFSET (calculated and saved on first use)
+            timezone_offset = self.get_timezone_offset(symbol)
+            offset_timedelta = dt.timedelta(seconds=timezone_offset)
+            
+            # CONVERT SYSTEM TIME TO BROKER TIME
+            # User passes system time, we need to subtract offset to get broker time
+            broker_start_dt = start_dt - offset_timedelta
+            broker_end_dt = end_dt - offset_timedelta
+            
+            self.logger.debug(f"Adjusted time range for MT5:")
+            self.logger.debug(f"  System time: {start_dt} to {end_dt}")
+            self.logger.debug(f"  Broker time: {broker_start_dt} to {broker_end_dt}")
+            
+            # Pull raw ticks for the interval using BROKER time
+            ticks = mt5.copy_ticks_range(symbol, broker_start_dt, broker_end_dt, mt5.COPY_TICKS_ALL)
             if ticks is None or len(ticks) == 0:
                 self.logger.info(f"No tick data available for {symbol} in range {start_dt.date()}-{end_dt.date()}.")
                 return []
@@ -83,6 +96,9 @@ class DataFetcher:
 
             # Build bars from tick groups using requested price mode
             bars: List[Bar] = []
+
+            # Get the timezone offset
+            timezone_offset = self.get_timezone_offset(symbol)
 
             for candle_start, ticks_in_candle in sorted(candle_ticks.items()):
                 if not ticks_in_candle:
@@ -161,9 +177,10 @@ class DataFetcher:
                 else:
                     raise ValueError(f"Unknown pricing mode: {mode}")
 
+                adjusted_timestamp = self.apply_timezone_offset(candle_start, timezone_offset)
                 bars.append(
                     Bar(
-                        timestamp=candle_start,
+                        timestamp=adjusted_timestamp,
                         open_price=float(open_price),
                         high=float(high_price),
                         low=float(low_price),
@@ -282,6 +299,95 @@ class DataFetcher:
         }
         return timeframe_seconds.get(timeframe, 60)  # Default to 1 minute
 
+    def calculate_and_save_timezone_offset(self, symbol: str = "GBPUSD") -> int:
+        """
+        Calculate timezone offset between MT5 server and system time.
+        Uses copy_rates_from_pos to get the latest bar regardless of timezone.
+        
+        Args:
+            symbol: Symbol to fetch data from (default: GBPUSD)
+        
+        Returns:
+            Timezone offset in seconds
+        """
+        self.logger.info(f"Calculating timezone offset using {symbol}...")
+        self._ensure_connection()
+        
+        try:
+            # Get current system time
+            system_time = dt.datetime.now()
+            
+            # Get the timeframe enum (use M1 for most accurate current time)
+            tf_enum = self.timeframe_map.get("M1", mt5.TIMEFRAME_M1)
+            
+            # Fetch the latest bar using copy_rates_from_pos
+            # Position 0 = most recent bar, count 1 = just one bar
+            rates = mt5.copy_rates_from_pos(symbol, tf_enum, 0, 1)
+            
+            if rates is None or len(rates) == 0:
+                self.logger.warning(f"Could not fetch rates for timezone calculation. Using 0 offset.")
+                return 0
+            
+            # Get the latest bar timestamp (time is in seconds since epoch)
+            latest_rate = rates
+            mt5_time = dt.datetime.fromtimestamp(int(latest_rate['time']))
+            
+            # Calculate offset in seconds
+            offset_seconds = int((system_time - mt5_time).total_seconds())
+            
+            self.logger.info(f"Timezone offset calculated: {offset_seconds} seconds ({offset_seconds/3600:.2f} hours)")
+            self.logger.info(f"  MT5 Time: {mt5_time}")
+            self.logger.info(f"  System Time: {system_time}")
+            
+            # Save to config
+            settings.set('data.timezone_offset_seconds', offset_seconds)
+            settings.save_config()
+            
+            self.logger.info(f"Timezone offset saved to config.yaml")
+            
+            return offset_seconds
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating timezone offset: {e}")
+            return 0
+        finally:
+            self._close_connection()
+
+
+    def get_timezone_offset(self, symbol: str = "GBPUSD") -> int:
+        """
+        Get timezone offset from config, calculating it if not already set.
+        
+        Args:
+            symbol: Symbol to use for calculation if needed
+        
+        Returns:
+            Timezone offset in seconds
+        """
+        offset = settings.get('data.timezone_offset_seconds', None)
+        
+        if offset is None:
+            # Calculate and save offset on first use
+            self.logger.info("Timezone offset not found in config. Calculating now...")
+            offset = self.calculate_and_save_timezone_offset(symbol)
+        else:
+            self.logger.debug(f"Using saved timezone offset: {offset} seconds")
+        
+        return offset
+
+
+    def apply_timezone_offset(self, bar_timestamp: dt.datetime, offset_seconds: int) -> dt.datetime:
+        """
+        Apply timezone offset to a bar timestamp.
+        
+        Args:
+            bar_timestamp: Original bar timestamp from MT5
+            offset_seconds: Timezone offset in seconds
+        
+        Returns:
+            Adjusted timestamp in system timezone
+        """
+        return bar_timestamp #+ dt.timedelta(seconds=offset_seconds)
 
     def fetch_rates_to_csv(
         self,

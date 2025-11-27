@@ -1,4 +1,3 @@
-import asyncio
 import threading
 import json
 import time as goodtimes
@@ -10,7 +9,7 @@ from collections import defaultdict
 from src.core.models.signal import Signal, SignalAction, SignalType
 from src.core.models.bar import Bar
 from src.core.models.budget import Budget
-from src.indicators.breakout import BreakoutEngine
+from src.indicators.breakout import BreakoutEngine, BreakoutType
 from src.indicators.mbox import MBoxAnalyzer
 from src.indicators.choch import FakeCHoCHDetector
 from src.core.execution.mt5_connection import MT5Connection
@@ -78,7 +77,7 @@ class TwoHuntersStrategy():
         self.margin_pips = self.config.get("margin_pips")
         self.fvg_range = (
             self.config.get("fvg", {}).get("min_size_pips", 1.0),
-            self.config.get("fvg", {}).get("max_size_pips", 3.0)
+            self.config.get("fvg", {}).get("max_size_pips", 5.0)
         )
         self.ratios = self.config.get("ratios", {"stop_loss": 1.0, "take_profit": 3.0})
         
@@ -97,7 +96,7 @@ class TwoHuntersStrategy():
         )
 
         # MBox Analyzer
-        self.mbox_analyzer = MBoxAnalyzer(budget=self.budget)
+        self.mbox_analyzer = MBoxAnalyzer()
         
         # Fake CHoCH Detector
         choch_config = self.config.get("choch", {})
@@ -122,13 +121,13 @@ class TwoHuntersStrategy():
     
     def _get_session_time(self) -> Tuple[time, time]:
         """Get trading session hours from config"""
-        session_time_config = settings.get("strategies.two_hunters.session_time", {})
+        session_time_config = settings.get("strategies.two_hunters.sessions.main", {})
 
         start_time = datetime.strptime(session_time_config["start"], "%H:%M").time()
         end_time = datetime.strptime(session_time_config["end"], "%H:%M").time()
 
         return (start_time, end_time)
-    
+
     def get_mbox_bars(self, target_date: datetime) -> List[Bar]:
         """Get MBox session bars for the target date"""
         mbox_start = datetime.combine(target_date.date(), self.mbox_time[0])
@@ -199,7 +198,7 @@ class TwoHuntersStrategy():
         
         def dynamic_fvg_scale(fvg_size_pips: float) -> float:
             """Calculate dynamic scale based on FVG size"""
-            if fvg_size_pips <= min_fvg:
+            if fvg_size_pips < min_fvg:
                 return 1.0
             elif fvg_size_pips >= max_fvg:
                 return 0.5
@@ -207,28 +206,26 @@ class TwoHuntersStrategy():
         
         if action == SignalAction.SELL:
             # Check for bullish FVG
-            if before_bar.low > after_bar.high:
-                fvg_size_pips = self.budget.pips_from_diff(before_bar.low - after_bar.high)
+            if before_bar.low > signal_bar.close:
+                fvg_size_pips = self.budget.pips_from_diff(before_bar.low - signal_bar.close)
                 scale = dynamic_fvg_scale(fvg_size_pips)
-                entry_price = before_bar.low - (before_bar.low - after_bar.high) * scale
+                entry_price = before_bar.low - (before_bar.low - signal_bar.close) * scale
                 
-                self.logger.debug(f"SELL FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f} -- NOT USED --")
+                self.logger.debug(f"SELL FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f}")
             
-            entry_price = signal_bar.close
             diff = abs(extrema - entry_price)
             stop_loss = self.ratios["stop_loss"] * (extrema + (diff*self.margin_pips))
             take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss)
-        
+
         elif action == SignalAction.BUY:
             # Check for bullish FVG
-            if after_bar.low > before_bar.high:
-                fvg_size_pips = self.budget.pips_from_diff(after_bar.low - before_bar.high)
+            if signal_bar.close > before_bar.high:
+                fvg_size_pips = self.budget.pips_from_diff(signal_bar.close - before_bar.high)
                 scale = dynamic_fvg_scale(fvg_size_pips)
-                entry_price = before_bar.high + (after_bar.low - before_bar.high) * scale
+                entry_price = before_bar.high + (signal_bar.close - before_bar.high) * scale
                 
-                self.logger.debug(f"BUY FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f} -- NOT USED --")
+                self.logger.debug(f"BUY FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f}")
             
-            entry_price = signal_bar.close
             diff = abs(extrema - entry_price)
             stop_loss = self.ratios["stop_loss"] * (extrema - (diff*self.margin_pips))
             take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss)
@@ -307,25 +304,74 @@ class TwoHuntersStrategy():
         
         # Analyze MBox for market bias
         mbox_result = self.mbox_analyzer.calculate(mbox_bars)
+        self.breakout_engine.symbol = self.symbol
 
         # Hunt for breakout
         if faild_signal is None:
-            self.breakout_engine.num_hunt = self.config.get("breakout.num_hunt_main", 2)
-            extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.calculate(
-                session_bars, mbox_result
+            self.breakout_engine.type = BreakoutType.DEFAULT
+            extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.breakout(
+                session_bars, mbox_result, True
             )
         else:
-            self.breakout_engine.num_hunt = self.config.get("breakout.num_hunt_recovery", 1)
-            outcome_timestamp = faild_signal.outcome_timestamp - timedelta(minutes=1)
+            outcome_timestamp = faild_signal.outcome_timestamp
             mbox_bars.extend([bar for bar in session_bars if bar.timestamp <= outcome_timestamp])
-            mbox_result = self.mbox_analyzer.calculate(mbox_bars)
+            extended_mbox_result = self.mbox_analyzer.calculate(mbox_bars)
+
+            # Get current day from session bars
+            current_day = session_bars[0].timestamp
             
-            recovery_bars = [bar for bar in session_bars if bar.timestamp >= outcome_timestamp]
-
-            extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.calculate(
-                recovery_bars, mbox_result
+            # Fetch previous day session extrema
+            from src.core.data.fetcher import DataFetcher
+            fetcher = DataFetcher()
+            
+            session_extrema = self.get_previous_day_session_extrema(
+                current_day, 
+                fetcher, 
+                self.symbol
             )
+            
+            # Update mbox result with session extrema if more extreme
+            new_results = self.update_mbox_with_session_extrema(
+                extended_mbox_result, 
+                session_extrema
+            )
+            
+            ok = False
+            if faild_signal.is_buy and new_results["min_val"]:
 
+                diff_from_mbox_to_signal = abs(mbox_result["min_val"] - faild_signal.exit_price)
+                diff_from_mbox_to_newbox = abs(mbox_result["min_val"] - new_results["min_val"])
+
+                if diff_from_mbox_to_signal / diff_from_mbox_to_newbox >= 0.5:
+                    ok = True
+
+            elif faild_signal.is_sell and new_results["max_val"]:
+
+                diff_from_mbox_to_signal = abs(mbox_result["max_val"] - faild_signal.exit_price)
+                diff_from_mbox_to_newbox = abs(mbox_result["max_val"] - new_results["max_val"])
+
+                if diff_from_mbox_to_signal / diff_from_mbox_to_newbox >= 0.5:
+                    ok = True
+
+            if not ok:
+                return None
+                self.breakout_engine.type = BreakoutType.RECOVERY
+
+                recovery_bars = [bar for bar in session_bars if bar.timestamp > outcome_timestamp]
+                extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.breakout(
+                    recovery_bars, extended_mbox_result, False
+                )
+
+            if ok:
+                self.breakout_engine.type = BreakoutType.RECOVERY
+                
+                if new_results["max_val"] is None: new_results["max_val"] = extended_mbox_result["max_val"] 
+                if new_results["min_val"] is None: new_results["min_val"] = extended_mbox_result["min_val"]
+
+                recovery_bars = [bar for bar in session_bars if bar.timestamp > outcome_timestamp]
+                extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.breakout(
+                    recovery_bars, new_results
+                )
 
         if not signal_bar:
             self.logger.debug("No breakout signal found")
@@ -408,6 +454,32 @@ class TwoHuntersStrategy():
                     signal.take_profit = _2r_top
                     signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
 
+        # if faild_signal and ok:
+        #     if signal.is_buy:
+        #         _r = signal.entry_price + abs(signal.entry_price - signal.stop_loss) * 4.5
+        #         signal.initial_take_profit = _r
+        #         signal.take_profit = _r
+        #         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+                
+        #     if signal.is_sell:
+        #         _r = signal.entry_price - abs(signal.entry_price - signal.stop_loss) * 4.5
+        #         signal.initial_take_profit = _r
+        #         signal.take_profit = _r
+        #         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+        
+        # elif faild_signal and not ok:
+        #     if signal.is_buy:
+        #         _r = signal.entry_price + abs(signal.entry_price - signal.stop_loss) * 2
+        #         signal.initial_take_profit = _r
+        #         signal.take_profit = _r
+        #         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+                
+        #     if signal.is_sell:
+        #         _r = signal.entry_price - abs(signal.entry_price - signal.stop_loss) * 2
+        #         signal.initial_take_profit = _r
+        #         signal.take_profit = _r
+        #         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+
         # Log signal generation
         log_signal_event(
             "main_signal_generated", self.symbol, action_enum.value,
@@ -473,13 +545,11 @@ class TwoHuntersStrategy():
         symbols: List[str],
         start_date: datetime,
         end_date: datetime,
-        use_risk_manager: bool,
         output_dir: Optional[str] = None,
         **args
     ) -> Dict[str, Any]:
         """Run backtesting on historical data with integrated plotting"""
         logger = TradingLogger.get_backtest_logger()
-        from src.core.utils.plotter import TradingPlotter
         from src.core.data.fetcher import DataFetcher
         import click
 
@@ -552,7 +622,8 @@ class TwoHuntersStrategy():
                         
                 days_processed += 1
                 current_date += timedelta(days=1)
-                commission_loss = sum([s.commission for s in signals])
+                commission_loss = sum([s.commission for s in signals if not s.used_flag])
+                # trend_str = f" | TREND: {self.mbox_analyzer.results['trend']} CONF: {round(self.mbox_analyzer.results['trend_confidence'], 2)}"
                 click.echo(f"Date: {current_date.date()} --> Running Balance: {round(self.budget.current_balance)}$ + {round(commission_loss)}$ <--")
             
             # Evaluate prop status
@@ -591,19 +662,6 @@ class TwoHuntersStrategy():
                 try:
                     # Initialize plotter
                     report_dir = output_dir or "reports"
-                    fetcher = DataFetcher()
-                    
-                    all_charts = []
-                    bars_data = {}
-
-                    for symbol in symbols:
-                        # Fetch bars
-                        bars = fetcher.fetch_bars_from_mt5(start_date, end_date, symbol)
-                        if not bars:
-                            logger.warning(f"No data found for {symbol}")
-                        
-                        # Store data for comprehensive report
-                        bars_data[symbol] = bars
 
                     try:
                         # Import ReportGenerator here to avoid circular imports
@@ -612,10 +670,9 @@ class TwoHuntersStrategy():
                         report_gen = ReportGenerator(report_dir)
                         report_path = report_gen.generate_full_trading_report(
                             symbols=symbols,
-                            barsdata=bars_data,
+                            date_range=(start_date, end_date),
                             results=results,
-                            flags=args,
-                            reporttitle=f"Backtest Report: {start_date.date()} to {end_date.date()}"
+                            flags=args
                         )
                         
                         logger.info(f"Report generated: {report_path}")
@@ -628,13 +685,6 @@ class TwoHuntersStrategy():
                         lineno = tb.lineno
 
                         logger.error(f"Error generating reports: {e} (File: {filename}, line {lineno})")
-                    
-                    # Update results with plotting information
-                    results['plotting'] = {
-                        'charts': all_charts,
-                        'report_directory': report_dir,
-                        'symbols_plotted': len([s for s in symbols if s in bars_data])
-                    }
                     
                 except Exception as e:
                     logger.error(f"Error in plotting integration: {e}")
@@ -971,6 +1021,158 @@ class TwoHuntersStrategy():
             return 10
         else:
             return 1
+
+    def get_previous_day_session_extrema(
+        self,
+        current_day: datetime,
+        fetcher,
+        symbol: str
+    ) -> dict:
+        """
+        Extract London and New York session highs/lows from the previous day.
+        Compare with mbox extrema and return updated box values if needed.
+        
+        Args:
+            current_day: Current trading day (from session_bars[0].timestamp)
+            fetcher: DataFetcher instance to fetch historical bars
+            symbol: Trading symbol
+            
+        Returns:
+            dict with updated max_val and min_val if session extrema are more extreme
+        """
+        # Get London and New York times from YAML config
+        london_config = settings.get("strategies.twohunters.sessions.london", {})
+        newyork_config = settings.get("strategies.twohunters.sessions.newyork", {})
+        
+        london_start = datetime.strptime(london_config.get("start", "14:00"), "%H:%M").time()
+        london_end = datetime.strptime(london_config.get("end", "21:59"), "%H:%M").time()
+        newyork_start = datetime.strptime(newyork_config.get("start", "20:00"), "%H:%M").time()
+        newyork_end = datetime.strptime(newyork_config.get("end", "02:29"), "%H:%M").time()
+        
+        # Calculate previous day
+        previous_day = current_day - timedelta(days=1)
+        
+        # Fetch bars for previous day
+        prev_day_start = datetime.combine(previous_day.date(), time(0, 0))
+        prev_day_end = datetime.combine(previous_day.date(), time(23, 59))
+        
+        try:
+            previous_bars = fetcher.fetch_bars_from_mt5(
+                prev_day_start,
+                prev_day_end,
+                symbol
+            )
+            
+            if not previous_bars:
+                if not previous_bars:
+                    self.logger.warning(f"No bars fetched for previous day {previous_day.date()}")
+                    return {"max_val": None, "min_val": None}
+            
+            # Extract London session bars
+            london_start_dt = datetime.combine(previous_day.date(), london_start)
+            london_end_dt = datetime.combine(previous_day.date(), london_end)
+            
+            # Handle London session crossing midnight
+            if london_end < london_start:
+                london_end_dt += timedelta(days=1)
+            
+            london_bars = [
+                bar for bar in previous_bars
+                if london_start_dt <= bar.timestamp <= london_end_dt
+            ]
+            
+            # Extract New York session bars
+            newyork_start_dt = datetime.combine(previous_day.date(), newyork_start)
+            newyork_end_dt = datetime.combine(previous_day.date(), newyork_end)
+            
+            # Handle New York session crossing midnight
+            if newyork_end < newyork_start:
+                newyork_end_dt += timedelta(days=1)
+            
+            newyork_bars = [
+                bar for bar in previous_bars
+                if newyork_start_dt <= bar.timestamp <= newyork_end_dt
+            ]
+            
+            # Calculate high and low for each session
+            london_high = max(bar.high for bar in london_bars) if london_bars else None
+            london_low = min(bar.low for bar in london_bars) if london_bars else None
+            newyork_high = max(bar.high for bar in newyork_bars) if newyork_bars else None
+            newyork_low = min(bar.low for bar in newyork_bars) if newyork_bars else None
+            
+            if london_high is None or newyork_high is None:
+                self.logger.warning(f"Missing session data for {previous_day.date()}")
+                return {"max_val": None, "min_val": None}
+            
+            # Calculate min(max(london, newyork)) and max(min(london, newyork))
+            new_max_extrema = min(london_high, newyork_high)
+            new_min_extrema = max(london_low, newyork_low)
+            
+            self.logger.info(
+                f"Previous day sessions - London: [{london_low:.5f}, {london_high:.5f}], "
+                f"NewYork: [{newyork_low:.5f}, {newyork_high:.5f}]"
+            )
+            self.logger.info(
+                f"Calculated extrema - max: {new_max_extrema:.5f}, min: {new_min_extrema:.5f}"
+            )
+            
+            return {
+                "max_val": new_max_extrema,
+                "min_val": new_min_extrema,
+                "london_high": london_high,
+                "london_low": london_low,
+                "newyork_high": newyork_high,
+                "newyork_low": newyork_low
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching previous day session extrema: {e}")
+            return {"max_val": None, "min_val": None}
+
+
+    def update_mbox_with_session_extrema(
+        self,
+        mbox_result: dict,
+        session_extrema: dict
+    ) -> dict:
+        """
+        Update mbox extrema if session extrema are more extreme.
+        
+        Args:
+            mbox_result: Current mbox result with max_val and min_val
+            session_extrema: Previous day session extrema
+            
+        Returns:
+            Updated mbox_result dict
+        """
+        if session_extrema["max_val"] is None or session_extrema["min_val"] is None:
+            return mbox_result
+        
+        current_max = mbox_result.get("max_val")
+        current_min = mbox_result.get("min_val")
+        
+        new_max = session_extrema["max_val"]
+        new_min = session_extrema["min_val"]
+        
+        updated = False
+        new_results = {"max_val": None, "min_val": None}
+        # Update max_val if session extrema is higher
+        if new_max > current_max:
+            new_results["max_val"] = new_max
+            updated = True
+            self.logger.info(f"Updated max_val: {current_max:.5f} -> {new_max:.5f}")
+        
+        # Update min_val if session extrema is lower
+        if new_min < current_min:
+            new_results["min_val"] = new_min
+            updated = True
+            self.logger.info(f"Updated min_val: {current_min:.5f} -> {new_min:.5f}")
+        
+        if not updated:
+            self.logger.info("Mbox extrema unchanged - session extrema not more extreme")
+        
+        return new_results
+
 
 import signal
 class GracefulKiller:

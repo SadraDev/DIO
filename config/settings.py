@@ -126,13 +126,37 @@ class Settings:
         return self._config.copy()
     
     def save_config(self, config_path: Optional[str] = None):
-        """Save current configuration to YAML file"""
+        """
+        Save current configuration to YAML file with preserved formatting.
+        Adds blank lines between major sections for readability.
+        """
         if config_path is None:
             config_dir = Path(__file__).parent
             config_path = config_dir / "config.yaml"
         
+        # Convert config to YAML string
+        yaml_str = yaml.dump(self._config, default_flow_style=False, indent=2, sort_keys=False)
+        
+        # Add blank lines between top-level sections
+        lines = yaml_str.split('\n')
+        formatted_lines = []
+        
+        for i, line in enumerate(lines):
+            # Check if this line is a top-level key
+            is_top_level = (line and 
+                        not line.startswith(' ') and 
+                        ':' in line and 
+                        not line.startswith('#'))
+            
+            # Add blank line BEFORE top-level keys (except the very first line)
+            if is_top_level and formatted_lines and formatted_lines[-1].strip():
+                formatted_lines.append('')
+            
+            formatted_lines.append(line)
+        
+        # Write formatted YAML
         with open(config_path, 'w', encoding='utf-8') as f:
-            yaml.dump(self._config, f, default_flow_style=False, indent=2)
+            f.write('\n'.join(formatted_lines))
     
     # Convenience methods for common configuration access
     @property
@@ -149,7 +173,7 @@ class Settings:
     
     @property
     def symbols(self) -> list:
-        return self.get('trading.symbols', ['EURUSD.', 'GBPUSD.'])
+        return self.get('trading.symbols', ['EURUSD', 'GBPUSD'])
     
     @property
     def initial_balance(self) -> float:

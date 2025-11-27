@@ -10,11 +10,6 @@ class BaseIndicator(ABC):
         self.name = name
         self.parameters = {}
     
-    @abstractmethod
-    def calculate(self, bars: List[Bar]) -> Any:
-        """Calculate indicator values from bars"""
-        pass
-    
     def set_parameter(self, key: str, value: Any):
         """Set indicator parameter"""
         self.parameters[key] = value

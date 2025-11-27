@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 
 from src.core.models.signal import Signal
@@ -19,10 +19,9 @@ class ReportGenerator:
     def generate_full_trading_report(
         self,
         symbols: List[str],
-        barsdata: Dict[str, List[Bar]],
+        date_range: Tuple[datetime, datetime],
         results: Dict[str, List[Signal]],
-        flags: Dict[str, bool],
-        reporttitle: str = "Trading Analysis Report"
+        flags: Dict[str, bool]
     ) -> str:
         """Generate comprehensive trading report with symbol-separated charts"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -34,12 +33,13 @@ class ReportGenerator:
         # Generate charts organized by symbol
         chartpaths = {}
         if not flags.get("no_plots"):
-            self.logger.info("Generating symbol-separated monthly charts...")
+            self.logger.info("Generating monthly charts for symbols separatly...")
             chartpaths = self.plotter.generate_monthly_charts(
-                barsdata=barsdata,
+                date_range=date_range,
                 results=results,
                 reportdir=reportdir,  # Pass report dir, not charts dir
-                showmbox=not flags.get("no_mbox")
+                showmbox=not flags.get("no_mbox"),
+                show_15m_bars=flags.get("show_15m_bars")
             )
             total_charts = sum(len(months) for months in chartpaths.values())
             self.logger.info(f"Generated {total_charts} charts across {len(chartpaths)} symbols")

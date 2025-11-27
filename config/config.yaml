@@ -1,13 +1,10 @@
-# System Configuration
 system:
-  name: "DIO"
-  version: "2.0.0"
+  name: DIO
+  version: 2.0.0
 
-# Paths Configuration  
 paths:
-  logs: "reports/logs"
+  logs: reports/logs
 
-# Account Settings
 account:
   initial_balance: 10000
   default_risk_percent: 0.005
@@ -16,10 +13,11 @@ account:
     total_fail_percent: 0.08
     win_target_percent: 0.15
 
-# Trading Configuration
 trading:
-  commission: 7
-  symbols: ["EURUSD.", "GBPUSD."]
+  commission: 0.0
+  symbols:
+  - EURUSD
+  - GBPUSD
   max_signals_per_symbol: 2
   risk:
     max_risk_percent: 0.05
@@ -30,13 +28,11 @@ trading:
       choch_cut: 2.0
       recovery_cut: 2.0
 
-# Market Parameters
 market:
   standard_pip_size: 0.0001
   standard_lot_size: 100000
   min_lot_size: 0.01
 
-# MT5 Configuration
 mt5:
   magic_number: 234000
   deviation: 10
@@ -44,19 +40,18 @@ mt5:
   reconnect_attempts: 3
   reconnect_delay: 5
 
-# Data Settings
 data:
-  timeframe: "M1"
-  mode: "min"
+  timeframe: M1
+  mode: hybrid
   max_bars_memory: 720
+  timezone_offset_seconds: 0
 
-# Strategy Configurations
 strategies:
   two_hunters:
     margin_pips: 0.02
     fvg:
-      min_size_pips: 1.0
-      max_size_pips: 3.0
+      min_size_pips: 3.5
+      max_size_pips: 5.0
     ratios:
       stop_loss: 1.0
       take_profit: 3.0
@@ -65,14 +60,21 @@ strategies:
       num_hunt_recovery: 1
     mbox_time:
       start: "04:30"
-      end: "12:30"
-    session_time:
-      start: "12:31"
-      end: "16:30"
+      end: "12:29"
+    sessions:
+      main:
+        start: "12:29"
+        end: "23:00"
+      london:
+        start: "14:00"
+        end: "21:59"
+      newyork:
+        start: "20:00"
+        end: "02:29"
     choch:
       window: 15
       tolerance: 5
-      buffer: 0.0000001
+      buffer: 1.0e-07
       intensity: 3.0
       use_volume: false
       single_hit: true
@@ -88,49 +90,49 @@ strategies:
       use_trend_flag: false
       use_time_flag: false
       use_choch_flag: false
-      time_flag_hour: "10:30"
+      time_flag_hour: '10:30'
       large_slp_magic_number: 6
     backtesting:
-      default_start: "2001-09-11"
-      default_end: "2001-09-12"
+      default_start: '2001-09-11'
+      default_end: '2001-09-12'
       save_results: true
-      output_format: "csv"
+      output_format: csv
     live_trading:
       work_interval: 1
       max_concurrent_symbols: 5
       enable_monitoring: true
       monitoring_port: 8765
-      emergency_stop_loss_percent: 0.10
+      emergency_stop_loss_percent: 0.1
       system_hours:
-        start: "09:30"
-        end: "13:30"
+        start: 09:30
+        end: '13:30'
 
-# Logging Configuration
 logging:
-  level: "INFO"
+  level: INFO
   log_to_file: true
   log_to_console: true
   max_file_size_mb: 50
   backup_count: 5
   format:
-    detailed: "%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d | %(message)s"
-    simple: "%(asctime)s | %(levelname)s | %(message)s"
+    detailed: '%(asctime)s | %(name)s | %(levelname)s | %(funcName)s:%(lineno)d |
+      %(message)s'
+    simple: '%(asctime)s | %(levelname)s | %(message)s'
   files:
-    main: "main.log"
-    trading: "trading.log"
-    backtest: "backtest.log"
-    connection: "connection.log"
-    system: "system.log"
-    signals: "signals.log"
+    main: main.log
+    trading: trading.log
+    backtest: backtest.log
+    connection: connection.log
+    system: system.log
+    signals: signals.log
 
 plotting:
-  default_chart_type: "interactive"  # or "static"
-  report_directory: "reports"
+  default_chart_type: interactive
+  report_directory: reports
   auto_open_browser: false
   save_static_backup: false
 
 monitoring:
-  websocket_host: "localhost"
+  websocket_host: localhost
   websocket_port: 8765
   update_interval: 5
   enable_alerts: true
