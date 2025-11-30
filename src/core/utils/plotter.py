@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 from pathlib import Path
 import json
+from config.settings import settings
 
 # Chart generation libraries
 try:
@@ -47,12 +48,16 @@ class TradingPlotter:
         
         # Load configuration
         self.mbox_hours = settings.get("strategies.two_hunters.mbox_time")
+        self.london_hours = settings.get("strategies.two_hunters.sessions.london")
+        self.newyork_hours = settings.get("strategies.two_hunters.sessions.newyork")
         
         # Color schemes - updated with blue MBox
         self.colors = {
             'bullish': '#00ff88',
             'bearish': '#ff4444',
             'mbox': 'rgba(52, 152, 219, 0.3)',  # Changed to blue
+            'newyork': 'rgba(8, 153, 129, 0.15)',  # Changed to blue
+            'london': 'rgba(255, 152, 0, 0.15)',  # Changed to blue
             'stoploss': 'rgba(255, 68, 68, 0.3)',  # Red for SL rectangles
             'takeprofit': 'rgba(0, 255, 136, 0.3)'  # Green for TP rectangles
         }
@@ -155,11 +160,16 @@ class TradingPlotter:
             # Add MBox highlights (blue, price-range height only)
             if show_mbox:
                 self.add_mbox_highlights(fig, df['timestamp'], bars)
+                self.add_london_highlights(fig, df['timestamp'], bars)
+                self.add_newyork_highlights(fig, df['timestamp'], bars)
             
             # Add trading signal rectangles stretching to outcome timestamp
             if signals:
                 self.add_signal_rectangles(fig, signals, bars)
             
+            _time_range_for_fvgs = (bars[0].timestamp, bars[-1].timestamp)
+            self.add_fvg_rectangles(fig, symbol, ['H1', 'M15'], _time_range_for_fvgs)
+
             # Update layout
             chart_title = title or f"{symbol} Trading Analysis - {bars[0].timestamp.date()} to {bars[-1].timestamp.date()}"
             fig.update_layout(
@@ -318,11 +328,9 @@ class TradingPlotter:
 
     def add_mbox_highlights(self, fig, timestamps, bars: List[Bar]):
         """Add MBox session highlights in blue with price-range height"""
-        from src.indicators.trend_detector import create_trend_detector
         start_date = timestamps.min().date()
         end_date = timestamps.max().date()
         current_date = start_date
-        detector = create_trend_detector('consensus')
         
         start_time = datetime.strptime(self.mbox_hours['start'], "%H:%M").time()
         end_time = datetime.strptime(self.mbox_hours['end'], "%H:%M").time()
@@ -330,7 +338,7 @@ class TradingPlotter:
         while current_date <= end_date:
             mbox_start = datetime.combine(current_date, start_time)
             mbox_end = datetime.combine(current_date, end_time)
-            
+
             # Handle MBox crossing midnight
             if end_time < start_time:
                 mbox_end += timedelta(days=1)
@@ -355,18 +363,112 @@ class TradingPlotter:
                     line_width=0
                 )
                 
-                # Detect MBox trend
-                trend, _, _ = detector.detect(mbox_bars)
-                if trend is not None: text = "has trend" if trend else "no trend"
-                else: text = "MBox"
+                # Add annotation
+                fig.add_annotation(
+                    x=mbox_start + (mbox_end - mbox_start) / 2,
+                    y=max_price,
+                    text="mbox",
+                    showarrow=False,
+                    font=dict(color="#2980b9", size=12),  # Blue text
+                    bgcolor="rgba(255,255,255,0.8)"
+                )
+                
+            current_date += timedelta(days=1)
+
+    def add_london_highlights(self, fig, timestamps, bars: List[Bar]):
+        """Add London session highlights in blue with price-range height"""
+        start_date = timestamps.min().date()
+        end_date = timestamps.max().date()
+        current_date = start_date
+        
+        start_time = datetime.strptime(self.london_hours['start'], "%H:%M").time()
+        end_time = datetime.strptime(self.london_hours['end'], "%H:%M").time()
+        
+        while current_date <= end_date:
+            mbox_start = datetime.combine(current_date, start_time)
+            mbox_end = datetime.combine(current_date, end_time)
+
+            # Handle MBox crossing midnight
+            if end_time < start_time:
+                mbox_end += timedelta(days=1)
+            
+            # Find price range during MBox hours
+            mbox_bars = [bar for bar in bars if mbox_start <= bar.timestamp <= mbox_end]
+            
+            if mbox_bars:
+                min_price = min(bar.low for bar in mbox_bars)
+                max_price = max(bar.high for bar in mbox_bars)
+
+                # Add blue rectangle with price-range height
+                fig.add_shape(
+                    type="rect",
+                    x0=mbox_start,
+                    y0=min_price,
+                    x1=mbox_end,
+                    y1=max_price,
+                    fillcolor=self.colors['london'],  # Blue color
+                    opacity=0.5,
+                    layer="below",
+                    line_width=0
+                )
+                
+
+                # Add annotation
+                fig.add_annotation(
+                    x=mbox_start + (mbox_end - mbox_start) / 2,
+                    y=max_price,
+                    text="london",
+                    showarrow=False,
+                    font=dict(color="#ff9800", size=12),  # Blue text
+                    bgcolor="rgba(255,255,255,0.8)"
+                )
+                
+            current_date += timedelta(days=1)
+
+    def add_newyork_highlights(self, fig, timestamps, bars: List[Bar]):
+        """Add newyork session highlights in blue with price-range height"""
+        start_date = timestamps.min().date()
+        end_date = timestamps.max().date()
+        current_date = start_date
+        
+        start_time = datetime.strptime(self.newyork_hours['start'], "%H:%M").time()
+        end_time = datetime.strptime(self.newyork_hours['end'], "%H:%M").time()
+        
+        while current_date <= end_date:
+            mbox_start = datetime.combine(current_date, start_time)
+            mbox_end = datetime.combine(current_date, end_time)
+
+            # Handle MBox crossing midnight
+            if end_time < start_time:
+                mbox_end += timedelta(days=1)
+            
+            # Find price range during MBox hours
+            mbox_bars = [bar for bar in bars if mbox_start <= bar.timestamp <= mbox_end]
+            
+            if mbox_bars:
+                min_price = min(bar.low for bar in mbox_bars)
+                max_price = max(bar.high for bar in mbox_bars)
+
+                # Add blue rectangle with price-range height
+                fig.add_shape(
+                    type="rect",
+                    x0=mbox_start,
+                    y0=min_price,
+                    x1=mbox_end,
+                    y1=max_price,
+                    fillcolor=self.colors['newyork'],  # Blue color
+                    opacity=0.5,
+                    layer="below",
+                    line_width=0
+                )
                 
                 # Add annotation
                 fig.add_annotation(
                     x=mbox_start + (mbox_end - mbox_start) / 2,
                     y=max_price,
-                    text=text,
+                    text="newyork",
                     showarrow=False,
-                    font=dict(color="#2980b9", size=12),  # Blue text
+                    font=dict(color="#089981", size=12),  # Blue text
                     bgcolor="rgba(255,255,255,0.8)"
                 )
                 
@@ -490,7 +592,8 @@ class TradingPlotter:
                          f"Initial SL: {round(initial_sl, 5) if initial_sl else 'NA'}<br>" +
                          f"Current SL: {round(signal.stop_loss, 5) if hasattr(signal, 'stop_loss') and signal.stop_loss else 'NA'}<br>" +
                          f"Initial TP: {round(initial_tp, 5) if initial_tp else 'NA'}<br>" +
-                         f"Current TP: {round(signal.take_profit, 5) if hasattr(signal, 'take_profit') and signal.take_profit else 'NA'}"
+                         f"Current TP: {round(signal.take_profit, 5) if hasattr(signal, 'take_profit') and signal.take_profit else 'NA'}<br>" +
+                         f"Signal type: {signal.signal_type}"
             ))
             
             # PART 4: OUTCOME MARKERS - CORRECTED
@@ -528,6 +631,154 @@ class TradingPlotter:
                                  f"Initial Entry: {initial_entry:.5f}<br>" +
                                  f"Gain: {round(getattr(signal, 'gain', 'NA'), 2) if getattr(signal, 'gain', None) is not None else 'NA'}"
                     ))
+
+    def add_fvg_rectangles(self, fig, symbol: str, timeframes: List[str] = None, date_range: tuple = None) -> None:        
+        if timeframes is None:
+            timeframes = ['H1', 'M15']
+        
+        try:
+            # Get FVG cache directory
+            fvg_dir = Path("reports") / "fvgs"
+            if not fvg_dir.exists():
+                self.logger.warning(f"FVG cache directory not found: {fvg_dir}")
+                return
+            
+            # Build cache file path
+            cache_path = fvg_dir / f"{symbol}_fvgs.json"
+            if not cache_path.exists():
+                self.logger.warning(f"No FVG cache found for {symbol}")
+                return
+            
+            # Load FVG data from JSON
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                fvg_data = json.load(f)
+            
+            self.logger.info(f"Loaded FVG data for {symbol} from {cache_path}")
+            
+            # Process each timeframe
+            for tf, fvg_list in fvg_data.items():
+                if tf not in timeframes:
+                    continue
+                
+                if not fvg_list:
+                    continue
+                
+                self.logger.info(f"Processing {len(fvg_list)} FVGs for {symbol}/{tf}")
+                
+                # Draw each FVG as a rectangle
+                for idx, fvg in enumerate(fvg_list):
+                    self._draw_fvg_rectangle(fig, fvg, symbol, tf, idx)
+        
+        except Exception as e:
+            self.logger.error(f"Error adding FVG rectangles: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def _draw_fvg_rectangle(self, fig, fvg: Dict[str, Any], symbol: str, 
+                            timeframe: str, index: int) -> None:
+        """
+        Draw a single FVG rectangle on the chart.
+        
+        Rectangle spans from detection_time to filled_timestamp (or now if unfilled).
+        Color and opacity depend on FVG type and fill status.
+        
+        Args:
+            fig: Plotly figure to draw on
+            fvg: FVG dictionary with keys: type, high, low, bar_open_time, 
+                detection_time, filled_timestamp
+            symbol: Trading symbol
+            timeframe: Timeframe (for reference/logging)
+            index: Index of FVG (for unique naming)
+        """
+        from datetime import datetime
+
+        try:
+            # Extract FVG properties
+            fvg_type = fvg.get('type', 'unknown')
+            high = fvg.get('high', 0)
+            low = fvg.get('low', 0)
+            detection_time_str = fvg.get('detection_time', '')
+            filled_time_str = fvg.get('filled_timestamp')
+            size_pips = fvg.get('size_pips', 0)
+            
+            # Parse timestamps
+            try:
+                detection_time = datetime.fromisoformat(detection_time_str)
+            except (ValueError, TypeError):
+                self.logger.warning(f"Invalid detection_time: {detection_time_str}")
+                return
+            
+            # End time is filled timestamp or now
+            if filled_time_str:
+                try:
+                    filled_time = datetime.fromisoformat(filled_time_str)
+                    end_time = filled_time
+                    is_filled = True
+                except (ValueError, TypeError):
+                    self.logger.warning(f"Invalid filled_timestamp: {filled_time_str}")
+                    end_time = datetime.now()
+                    is_filled = False
+            else:
+                end_time = datetime.now()
+                is_filled = False
+            
+            # Determine color and opacity based on FVG type
+            if fvg_type == 'bullish':
+                fill_color = 'rgba(0, 200, 100, 0.15)'  # Green, low opacity
+                line_color = 'rgba(0, 150, 80, 0.6)'    # Darker green
+                name_prefix = 'Bullish FVG'
+            elif fvg_type == 'bearish':
+                fill_color = 'rgba(255, 80, 80, 0.15)'  # Red, low opacity
+                line_color = 'rgba(200, 40, 40, 0.6)'   # Darker red
+                name_prefix = 'Bearish FVG'
+            else:
+                fill_color = 'rgba(150, 150, 150, 0.1)'  # Gray
+                line_color = 'rgba(100, 100, 100, 0.5)'
+                name_prefix = 'FVG'
+            
+            # Adjust line style based on fill status
+            line_dash = 'solid' if is_filled else 'dot'
+            
+            # Create rectangle name with useful info
+            rect_name = (f"{name_prefix} | {symbol}/{timeframe} | "
+                        f"Size: {size_pips:.1f}p | "
+                        f"{'Filled' if is_filled else 'Active'}")
+            
+            # Add rectangle to figure
+            fig.add_shape(
+                type='rect',
+                x0=detection_time,
+                y0=low,
+                x1=end_time,
+                y1=high,
+                fillcolor=fill_color,
+                line=dict(
+                    color=line_color,
+                    width=1.5,
+                    dash=line_dash
+                ),
+                layer='below',
+                name=rect_name
+            )
+            
+            # Optional: Add text label at midpoint of rectangle
+            if size_pips > 5:  # Only label large FVGs to avoid clutter
+                mid_time = detection_time + (end_time - detection_time) / 2
+                mid_price = (high + low) / 2
+                label_text = f"{size_pips:.1f}p"
+                
+                fig.add_annotation(
+                    x=mid_time,
+                    y=mid_price,
+                    text=label_text,
+                    showarrow=False,
+                    font=dict(size=9, color='rgba(0, 0, 0, 0.5)'),
+                    bgcolor='rgba(255, 255, 255, 0.7)',
+                    borderpad=2
+                )
+        
+        except Exception as e:
+            self.logger.error(f"Error drawing FVG rectangle for {fvg}: {e}")
 
     def plot_ohlc(
         self, 
@@ -1231,7 +1482,7 @@ class TradingPlotter:
                         start_dt=month_start,
                         end_dt=month_end,
                         symbol=symbol,
-                        timeframe="M1"
+                        timeframe=settings.get("data.timeframe")
                     )
                     self.logger.info(f"Fetched {len(bars_1m)} bars for {symbol} - Month {month_num} ({month_start.date()} to {month_end.date()})")
 
@@ -1479,11 +1730,14 @@ class TradingPlotter:
             symbol = getattr(signal, 'symbol', 'Unknown')
             action = signal.action.value if hasattr(signal, 'action') else 'N/A'
             
-            # Entry and exit prices
-            entry_price = f"{signal.entry_price:.5f}" if hasattr(signal, 'entry_price') and signal.entry_price else "N/A"
-            sl_price = f"{signal.stop_loss:.5f}" if hasattr(signal, 'stop_loss') and signal.stop_loss else "N/A"
-            tp_price = f"{signal.take_profit:.5f}" if hasattr(signal, 'take_profit') and signal.take_profit else "N/A"
+            # # Entry and exit prices
+            # entry_price = f"{signal.entry_price:.5f}" if hasattr(signal, 'entry_price') and signal.entry_price else "N/A"
+            # sl_price = f"{signal.stop_loss:.5f}" if hasattr(signal, 'stop_loss') and signal.stop_loss else "N/A"
+            # tp_price = f"{signal.take_profit:.5f}" if hasattr(signal, 'take_profit') and signal.take_profit else "N/A"
             
+            # Signal type
+            signal_type = signal.signal_type.value.upper() if hasattr(signal, 'signal_type') and signal.signal_type else "N/A"
+
             # Outcome and adjustments
             outcome = signal.outcome.value.upper() if hasattr(signal, 'outcome') and signal.outcome else 'PENDING'
             sl_adjusted = signal.sl_adjusted_count if hasattr(signal, 'sl_adjusted_count') else 0
@@ -1530,9 +1784,7 @@ class TradingPlotter:
                 <td>{timestamp}</td>
                 <td>{symbol}</td>
                 <td>{action}</td>
-                <td>{entry_price}</td>
-                <td>{sl_price}</td>
-                <td>{tp_price}</td>
+                <td>{signal_type}</td>
                 <td class="{outcome_class}">{outcome}</td>
                 <td>{sl_adjusted}</td>
                 <td>{lot_size}</td>
@@ -1556,9 +1808,7 @@ class TradingPlotter:
                             <th>DateTime</th>
                             <th>Symbol</th>
                             <th>Action</th>
-                            <th>Entry</th>
-                            <th>SL</th>
-                            <th>TP</th>
+                            <th>Type</th>
                             <th>Outcome</th>
                             <th>SL Adj</th>
                             <th>Lot Size</th>

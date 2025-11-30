@@ -250,7 +250,7 @@ class Budget:
           
         # Round to minimum lot size and apply limits
         lot_size = max(round(lot_size, 2), self.min_lot_size)
-        lot_size = min(lot_size, 10.0)  # Max 10 lots
+        lot_size = lot_size
         return lot_size
     
     def lots_from_diff_and_risk_amount(self, symbol: str, sl_distance: float, risk_amount: float):
@@ -268,7 +268,7 @@ class Budget:
           
         # Round to minimum lot size and apply limits
         lot_size = max(round(lot_size, 2), self.min_lot_size)
-        lot_size = min(lot_size, 10.0)  # Max 10 lots
+        lot_size = lot_size
         return lot_size
 
     def calculate_gain_loss(self, symbol: str, entry_price: float, exit_price: float, 

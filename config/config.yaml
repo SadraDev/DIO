@@ -7,14 +7,14 @@ paths:
 
 account:
   initial_balance: 10000
-  default_risk_percent: 0.005
+  default_risk_percent: 0.01
   prop_trading:
     daily_fail_percent: 0.05
     total_fail_percent: 0.08
     win_target_percent: 0.15
 
 trading:
-  commission: 0.0
+  commission: 5.0
   symbols:
   - EURUSD
   - GBPUSD
@@ -59,18 +59,18 @@ strategies:
       num_hunt_main: 2
       num_hunt_recovery: 1
     mbox_time:
-      start: "04:30"
-      end: "12:29"
+      start: '04:30'
+      end: '12:29'
     sessions:
       main:
-        start: "12:29"
-        end: "23:00"
+        start: '12:29'
+        end: '22:00'
       london:
-        start: "14:00"
-        end: "21:59"
+        start: '14:00'
+        end: '22:00'
       newyork:
-        start: "20:00"
-        end: "02:29"
+        start: '20:00'
+        end: '02:29'
     choch:
       window: 15
       tolerance: 5
@@ -91,7 +91,7 @@ strategies:
       use_time_flag: false
       use_choch_flag: false
       time_flag_hour: '10:30'
-      large_slp_magic_number: 6
+      large_slp_magic_number: 9
     backtesting:
       default_start: '2001-09-11'
       default_end: '2001-09-12'
