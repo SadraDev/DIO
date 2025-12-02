@@ -1,5 +1,18 @@
-from datetime import datetime
+from datetime import datetime, time
+from enum import Enum
 from typing import Optional
+
+
+class TrendDirection(Enum):
+    """
+    Enumeration for bar trend direction detection
+    
+    Used by the Bar.trendy property to classify candlestick patterns
+    and their implied trend direction.
+    """
+    UPTREND = "UPTREND"        # Bullish trend signal (hammer, bullish pin bar, etc.)
+    DOWNTREND = "DOWNTREND"    # Bearish trend signal (shooting star, bearish pin bar, etc.)
+    NEUTRAL = "NEUTRAL"        # Neutral/indecision signal (doji, balanced wicks, etc.)
 
 
 class Bar:
@@ -56,7 +69,7 @@ class Bar:
             body_to_range_ratio = self.body / self.range
             
             # Weak candle if body is less than 1/3 of total range
-            if body_to_range_ratio < 0.34:
+            if body_to_range_ratio < 0.3:
                 self.is_weak = True
                 
                 # Determine wick dominance for weak candles
@@ -66,7 +79,9 @@ class Bar:
                     self.is_head_up = True   # Lower wick dominant
                 else:
                     self.is_doji = True      # Both wicks similar
-    
+        else:
+            self.range = 0.0000001
+
     @property
     def midpoint(self) -> float:
         """Get midpoint of the high-low range"""
@@ -82,24 +97,105 @@ class Bar:
         """Get weighted close (OHLC/4)"""
         return (self.open + self.high + self.low + self.close) / 4
     
+    @property
+    def trendy(self) -> TrendDirection:
+        # DOJI is neutral obviously
+        if self.is_doji:
+            return TrendDirection.NEUTRAL
+
+        # Calculate key metrics for pattern recognition
+        upperwick_to_range = self.upper_wick / self.range if self.upper_wick > 0 else 0.001
+        lowerwick_to_range = self.lower_wick / self.range if self.lower_wick > 0 else 0.001
+        body_to_range = self.body / self.range if self.body > 0 else 0.001
+
+        # long wicks
+        if upperwick_to_range > 0.5:
+            return TrendDirection.DOWNTREND
+        if lowerwick_to_range > 0.5:
+            return TrendDirection.UPTREND
+
+        # no upperwick yes uptrend
+        if upperwick_to_range <= 0.08 and self.is_bullish:
+            return TrendDirection.UPTREND
+
+        # no lowerwick yes downtrend
+        if lowerwick_to_range <= 0.08 and self.is_bearish:
+            return TrendDirection.DOWNTREND
+
+        # Body > 90%
+        if body_to_range >= 0.9:
+            if self.is_bullish:
+                    return TrendDirection.UPTREND
+            if self.is_bearish:
+                    return TrendDirection.DOWNTREND
+
+        # # Body > 65% SIMPLE. uncomment if needed TODO: move to config
+        # if body_to_range >= 0.65:
+        #     if self.is_bullish:
+        #             return TrendDirection.UPTREND
+        #     if self.is_bearish:
+        #             return TrendDirection.DOWNTREND
+
+        # Body > 65%
+        if body_to_range >= 0.65:
+
+            wick_to_range = lowerwick_to_range + upperwick_to_range
+            
+            if wick_to_range  < 0.2 and self.is_bullish: return TrendDirection.UPTREND
+            if wick_to_range  < 0.2 and self.is_bearish: return TrendDirection.DOWNTREND
+            if wick_to_range >= 0.2:
+                if self.is_bullish:
+                    if lowerwick_to_range / upperwick_to_range >= 1.5:
+                            return TrendDirection.UPTREND
+                else:
+                    return TrendDirection.NEUTRAL
+                
+                if self.is_bearish:
+                    if upperwick_to_range / lowerwick_to_range >= 1.5:
+                        return TrendDirection.DOWNTREND
+                else:
+                    return TrendDirection.NEUTRAL
+
+        # wick/wick on weak
+        if self.is_weak:
+            if lowerwick_to_range / upperwick_to_range >= 3.5:
+                return TrendDirection.UPTREND
+
+            if upperwick_to_range / lowerwick_to_range >= 3.5:
+                return TrendDirection.DOWNTREND
+        
+        if not self.is_weak:
+            if lowerwick_to_range / upperwick_to_range >= 2.0:
+                return TrendDirection.UPTREND
+
+            if upperwick_to_range / lowerwick_to_range >= 2.0:
+                return TrendDirection.DOWNTREND
+
+        return TrendDirection.NEUTRAL
+    
+    @property
     def is_inside_bar(self, previous_bar: 'Bar') -> bool:
         """Check if this is an inside bar relative to previous bar"""
         return (self.high <= previous_bar.high and 
                 self.low >= previous_bar.low)
     
+    @property
     def is_outside_bar(self, previous_bar: 'Bar') -> bool:
         """Check if this is an outside bar relative to previous bar"""
         return (self.high > previous_bar.high and 
                 self.low < previous_bar.low)
     
+    @property
     def overlaps_with(self, other_bar: 'Bar') -> bool:
         """Check if this bar's range overlaps with another bar"""
         return not (self.high < other_bar.low or self.low > other_bar.high)
     
+    @property
     def get_body_midpoint(self) -> float:
         """Get midpoint of the body (open-close range)"""
         return (self.open + self.close) / 2
     
+    @property
     def percentage_change(self) -> float:
         """Get percentage change from open to close"""
         if self.open == 0:
@@ -173,7 +269,8 @@ class Bar:
             'is_doji': self.is_doji,
             'is_weak': self.is_weak,
             'is_head_down': self.is_head_down,
-            'is_head_up': self.is_head_up
+            'is_head_up': self.is_head_up,
+            'trendy': self.trendy.value
         }
     
     @classmethod

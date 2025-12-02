@@ -93,11 +93,11 @@ class TradingPlotter:
     def plot_candlestick_interactive(
         self, 
         bars: List[Bar],
-        _15m_bars: List[Bar],
+        _15m_bars: List[Bar] = None,
         signals: Optional[List[Signal]] = None, 
         symbol: str = "SYMBOL", 
         title: str = None, 
-        show_mbox: bool = True,
+        show_mbox: bool = False,
         show_15m_bars: bool = False,
         save_path: Optional[Path] = None,
         return_as_div: bool = False
@@ -852,6 +852,9 @@ class TradingPlotter:
             if symbol == "all":
                 continue
             
+            
+            _multipyer_list = [s.take_profit_pips / s.stop_loss_pips for s in signals]
+            multipyer = sum(_multipyer_list) / len(_multipyer_list)
             completed = [s for s in signals if hasattr(s, 'is_completed') and s.is_completed]
             
             if completed:
@@ -941,12 +944,16 @@ class TradingPlotter:
         seed_ts = signals_sorted[0].timestamp if signals_sorted and signals_sorted[0].timestamp else datetime.min
         equity_points.append((seed_ts, equity))
 
+
         for s in signals_sorted:
             gain = s.gain if getattr(s, "gain", None) is not None else 0.0
             equity += gain
             ts = s.timestamp if getattr(s, "timestamp", None) else (equity_points[-1][0] + timedelta(microseconds=1))
             equity_points.append((ts, equity))
 
+        _multipyer_list = [s.take_profit_pips / s.stop_loss_pips for s in signals_sorted]
+        multipyer = sum(_multipyer_list) / len(_multipyer_list)
+       
         # Drawdown and underwater calculations
         max_dd_abs = 0.0
         max_dd_pct = 0.0
@@ -1002,6 +1009,7 @@ class TradingPlotter:
             'total_loss_amount': sum(loss_gains) if loss_gains else 0.0,
             'profit_factor': (abs(sum(win_gains) / sum(loss_gains)) if loss_gains and sum(loss_gains) != 0 else float('inf')),
             'signals': all_signals,
+            'initial_balance': initial_balance,
 
             # New fields:
             'drawdown_abs': max_dd_abs,             # currency units
@@ -1060,18 +1068,18 @@ class TradingPlotter:
             x=dates,
             y=cumulative_pnl,
             mode='lines+markers',
-            name='Joint Cumulative PL',
-            line=dict(color='#3498db', width=4),
+            name='Joint Profit',
+            line=dict(color='#27ae60', width=4),
             marker=dict(size=6),
             fill='tonexty' if cumulative_pnl[-1] > 0 else None,
-            fillcolor='rgba(52, 152, 219, 0.15)'
+            fillcolor='rgba(46, 204, 113, 0.15)'
         ))
         
         # Add zero line for reference
         fig.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Breakeven")
         
         # Add individual symbol traces (different colors)
-        colors = ['#e74c3c', '#27ae60', '#f39c12', '#9b59b6', '#e67e22', '#1abc9c', '#95a5a6', '#34495e']
+        colors = ['#e74c3c', '#9b59b6', '#f39c12', '#e67e22', '#1abc9c', '#95a5a6', '#34495e', '#27ae60']
         symbol_cumulative = {}
         
         for i, signal in enumerate(sorted_signals):
@@ -1091,7 +1099,7 @@ class TradingPlotter:
                 x=data['dates'],
                 y=data['values'],
                 mode='lines',
-                name=f"{symbol}",
+                name=f"{symbol} Profit",
                 line=dict(color=color, width=2, dash='dot'),
                 opacity=0.8
             ))
@@ -1123,7 +1131,7 @@ class TradingPlotter:
                 'xanchor': 'right'
             },
             xaxis_title="Date",
-            yaxis_title="Cumulative Profit ($)",
+            yaxis_title="Profit ($)",
             autosize=True,
             height=None,
             width=None,
@@ -1291,33 +1299,35 @@ class TradingPlotter:
         if not joint_stats:
             return ""
         
+        win_percent = (joint_stats.get('total_profit', 0) / joint_stats.get("initial_balance", 0)) * 100
+        current_budget = joint_stats.get('total_profit', 0) + joint_stats.get('initial_balance', 0)
         return f"""
         <div class="chart-section">
             <h3>Overall Performance</h3>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 20px 0;">
-                <div style="background: rgba(52, 152, 219, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #3498db;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('total_signals', 0)}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Total Signals</div>
-                </div>
                 <div style="background: rgba(39, 174, 96, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #27ae60;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('overall_win_rate', 0):.1f}%</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Overall Win Rate</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Win/Loss Rate</div>
+                </div>
+                <div style="background: rgba(52, 152, 219, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #3498db;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{win_percent:.2f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Profit Percent</div>
                 </div>
                 <div style="background: rgba(231, 76, 60, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e74c3c;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('total_profit', 0):.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Total Profit</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('total_profit', 0):.0f}</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Profit</div>
                 </div>
                 <div style="background: rgba(230, 126, 34, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e67e22;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('max_win', 0):.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Max Single Win</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${current_budget:.0f}</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Current Budget</div>
                 </div>
                 <div style="background: rgba(52, 73, 94, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #34495e;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${abs(joint_stats.get('max_loss', 0)):.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Max Single Loss</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{abs(joint_stats.get('drawdown_pct', 0)):.2f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Draw Down Percent</div>
                 </div>
                 <div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #9b59b6;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('drawdown_abs', 0):.2f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">DrawDown</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('total_signals', 0):.0f}</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Total Signals</div>
                 </div>
             </div>
         </div>
@@ -1372,7 +1382,7 @@ class TradingPlotter:
                         <th>Win Rate</th>
                         <th>Total Profit</th>
                         <th>Total Commission</th>
-                        <th>Avg Profit/Trade</th>
+                        <th>Avg Profit per Trade</th>
                         <th>Max Win</th>
                         <th>Max Loss</th>
                         <th>Avg Win</th>

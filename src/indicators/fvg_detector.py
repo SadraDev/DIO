@@ -1,6 +1,6 @@
 import json
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta, time
 from pathlib import Path
 from src.core.models.bar import Bar
 from src.core.data.fetcher import DataFetcher
@@ -163,18 +163,13 @@ class FVGDetector(BaseIndicator):
         
         return fvg_list
 
-    def clean_filled_fvgs(
-        self,
-        current_results: Dict[str, Dict[str, List[Dict[str, Any]]]],
-    ) -> None:
+    def clean_filled_fvgs(self) -> None:
         """
         Remove FVGs that have been filled or violated by the latest bars.
         Mark filled FVGs with their fill timestamp.
-        
-        Args:
-            current_results: Dict[symbol][timeframe] = list of newly detected FVGs
         """
-        for symbol, tf_results in current_results.items():
+
+        for symbol, tf_results in self.fvgs.items():
             self.ensure_symbol_storage(symbol)
             
             for tf, current_fvgs in tf_results.items():
@@ -188,12 +183,11 @@ class FVGDetector(BaseIndicator):
                             datetime.fromisoformat(fvg["bar_open_time"])
                             for fvg in self.fvgs[symbol][tf]
                         )
-                        
                         check_bars = self.fetcher.fetch_bars_from_mt5(
                             oldest_fvg_time,
                             datetime.now(),
                             symbol,
-                            tf,
+                            "M1",
                         )
                     else:
                         check_bars = []
@@ -235,7 +229,7 @@ class FVGDetector(BaseIndicator):
         fvg_type = fvg["type"]
         fvg_high = fvg["high"]
         fvg_low = fvg["low"]
-        detection_time = datetime.fromisoformat(fvg["detection_time"])
+        detection_time = datetime.fromisoformat(fvg["detection_time"]) + timedelta(minutes=15)
         
         # Only check bars after detection
         bars_after = [bar for bar in bars if bar.timestamp > detection_time]
@@ -243,14 +237,14 @@ class FVGDetector(BaseIndicator):
         for bar in bars_after:
             if fvg_type == "bullish":
                 # Bullish FVG filled when low penetrates into gap
-                if bar.low <= (fvg_low + fvg_high) / 2:
+                if bar.low <= fvg_high:
                     return True, bar.timestamp.isoformat()
             elif fvg_type == "bearish":
                 # Bearish FVG filled when high penetrates into gap
-                if bar.high >= (fvg_low + fvg_high) / 2:
+                if bar.high >= fvg_low:
                     return True, bar.timestamp.isoformat()
         
-        return False
+        return False, None
 
     def get_fvg_cache_path(self, symbol: str) -> Path:
         """Get path to FVG cache JSON file for a symbol."""
@@ -289,8 +283,9 @@ class FVGDetector(BaseIndicator):
                 with open(cache_path, "w", encoding="utf-8") as f:
                     json.dump(serializable_fvgs, f, indent=2)
         
-        except Exception:
+        except Exception as e:
             # Silently fail if cache write fails
+            print(e)
             pass
 
     def load_fvgs_from_cache(self) -> None:
@@ -480,7 +475,7 @@ class FVGDetector(BaseIndicator):
             results[symbol] = symbol_results
         
         # Clean up filled/violated FVGs
-        self.clean_filled_fvgs(results)
+        self.clean_filled_fvgs()
         
         # Save to cache
         self.save_fvgs_to_cache()

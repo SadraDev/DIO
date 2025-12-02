@@ -98,14 +98,15 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
     from src.core.models.budget import Budget
     from config.settings import settings
 
+    _flags_path = "strategies.two_hunters.flags."
     settings.set("trading.commission", commission) if commission is not None else None
-    settings.set("strategies.two_hunters.flags.use_2r_for_eur", use_2r_for_eur)
-    settings.set("strategies.two_hunters.flags.use_trend_flag", use_trend_flag)
-    settings.set("strategies.two_hunters.flags.use_risk_manager", use_risk_manager)
-    settings.set("strategies.two_hunters.flags.use_large_slp_flag", use_large_slp_flag)
-    settings.set("strategies.two_hunters.flags.use_online_commission_manager", use_online_commission_manager)
-    settings.set("strategies.two_hunters.flags.use_offline_commission_manager", use_offline_commission_manager)
-    settings.set("strategies.two_hunters.flags.use_time_flag", use_time_flag)
+    if not settings.get(f"{_flags_path}use_2r_for_eur"): settings.set(f"{_flags_path}use_2r_for_eur", use_2r_for_eur)
+    if not settings.get(f"{_flags_path}use_trend_flag"): settings.set(f"{_flags_path}use_trend_flag", use_trend_flag)
+    if not settings.get(f"{_flags_path}use_risk_manager"): settings.set(f"{_flags_path}use_risk_manager", use_risk_manager)
+    if not settings.get(f"{_flags_path}use_large_slp_flag"): settings.set(f"{_flags_path}use_large_slp_flag", use_large_slp_flag)
+    if not settings.get(f"{_flags_path}use_online_commission_manager"): settings.set(f"{_flags_path}use_online_commission_manager", use_online_commission_manager)
+    if not settings.get(f"{_flags_path}use_offline_commission_manager"): settings.set(f"{_flags_path}use_offline_commission_manager", use_offline_commission_manager)
+    if not settings.get(f"{_flags_path}use_time_flag"): settings.set(f"{_flags_path}use_time_flag", use_time_flag)
     settings.set("account.default_risk_percent", risk) if risk is not None else None
     settings.set("account.initial_balance", balance) if balance is not None else None
 

@@ -84,7 +84,7 @@ strategies:
       use_2r_for_eur: false
       use_online_commission_manager: false
       use_offline_commission_manager: false
-      use_large_slp_flag: false
+      use_large_slp_flag: true
       use_trading_hours: false
       use_all_flags: false
       use_trend_flag: false
