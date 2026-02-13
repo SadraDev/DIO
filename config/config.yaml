@@ -6,7 +6,7 @@ paths:
   logs: reports/logs
 
 account:
-  initial_balance: 10000
+  balance: 10000
   default_risk_percent: 0.01
   prop_trading:
     daily_fail_percent: 0.05
@@ -16,8 +16,8 @@ account:
 trading:
   commission: 5.0
   symbols:
-  - EURUSD
-  - GBPUSD
+  - EURUSD.
+  - GBPUSD.
   max_signals_per_symbol: 2
   risk:
     max_risk_percent: 0.05
@@ -88,10 +88,11 @@ strategies:
       use_trading_hours: false
       use_all_flags: false
       use_trend_flag: false
-      use_time_flag: false
+      use_time_flag: true
       use_choch_flag: false
       time_flag_hour: '10:30'
       large_slp_magic_number: 9
+      order_block_significance: 0.00
     backtesting:
       default_start: '2001-09-11'
       default_end: '2001-09-12'
@@ -106,7 +107,20 @@ strategies:
       system_hours:
         start: 09:30
         end: '13:30'
-
+  Tweny:
+    ratio:
+      sl: 1
+      tp: 2
+    sl_margin_pct: 0.3
+    pips_to_widen_fgvs: 1.5
+    pips_to_merge_fgvs: 1.6
+    force_stop_time: "17:30"
+    minimum_pips_for_fgvs: 5
+    should_recover: false
+    allowed_trading_hour:
+      start: "12:30"
+      end: "17:05"
+    
 logging:
   level: INFO
   log_to_file: true

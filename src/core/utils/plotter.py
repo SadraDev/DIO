@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, date
 import pandas as pd
 from pathlib import Path
 import json
@@ -167,8 +167,9 @@ class TradingPlotter:
             if signals:
                 self.add_signal_rectangles(fig, signals, bars)
             
+            _day_range = (df['low'].min(), df['high'].max())
             _time_range_for_fvgs = (bars[0].timestamp, bars[-1].timestamp)
-            self.add_fvg_rectangles(fig, symbol, ['H1', 'M15'], _time_range_for_fvgs)
+            self.add_fvg_rectangles(fig, symbol, ['H1', 'M15'], _time_range_for_fvgs, _day_range)
 
             # Update layout
             chart_title = title or f"{symbol} Trading Analysis - {bars[0].timestamp.date()} to {bars[-1].timestamp.date()}"
@@ -475,8 +476,7 @@ class TradingPlotter:
             current_date += timedelta(days=1)
 
     def add_signal_rectangles(self, fig, signals: List[Signal], bars: List[Bar]):
-        """Add trading signal visualization with separate areas and lines - CORRECTED
-        Proper initial vs current level visualization"""
+        """Add trading signal visualization with separate areas and lines"""
         
         for signal in signals:
             if not hasattr(signal, 'timestamp') or not signal.timestamp:
@@ -588,31 +588,32 @@ class TradingPlotter:
                 ),
                 name=f"Entry {signal.action.value}",
                 showlegend=False,
-                hovertext=f"Initial Entry: {initial_entry:.5f}<br>" +
-                         f"Initial SL: {round(initial_sl, 5) if initial_sl else 'NA'}<br>" +
+                hovertext=f"Entry: {initial_entry:.5f}<br>" +
                          f"Current SL: {round(signal.stop_loss, 5) if hasattr(signal, 'stop_loss') and signal.stop_loss else 'NA'}<br>" +
-                         f"Initial TP: {round(initial_tp, 5) if initial_tp else 'NA'}<br>" +
                          f"Current TP: {round(signal.take_profit, 5) if hasattr(signal, 'take_profit') and signal.take_profit else 'NA'}<br>" +
-                         f"Signal type: {signal.signal_type}"
+                         f"Entry Lot: {signal.entry_lot if signal.entry_lot else 'NA'}<br>" +
+                         f"SLP: {round(signal.stop_loss_pips, 1) if signal.stop_loss_pips else 'NA'}<br>" +
+                         f"TPP: {round(signal.take_profit_pips, 1) if signal.take_profit_pips else 'NA'}<br>" +
+                         f"Signal type: {signal.signal_type.name}"
             ))
             
-            # PART 4: OUTCOME MARKERS - CORRECTED
+            # PART 4: OUTCOME MARKERS
             if (hasattr(signal, 'outcome') and signal.outcome and 
                 hasattr(signal, 'outcome_timestamp') and signal.outcome_timestamp):
                 
                 if not signal.used_flag:
-                    outcome_color = "green" if signal.outcome.value == "win" else "red"
+                    outcome_color = "green" if signal.gain >= 0 else "red"
                 else:
                     outcome_color = "grey"
-                outcome_symbol = "triangle-up" if signal.outcome.value == "win" else "triangle-down"
+                outcome_symbol = "triangle-up" if signal.gain >= 0 else "triangle-down"
                 
                 # CORRECTED: Determine actual exit price based on outcome
-                if signal.outcome.value == "win":
+                if signal.gain >= 0:
                     # Win means TP was hit - exit at current TP level
-                    actual_exit_price = signal.take_profit
+                    actual_exit_price = signal.exit_price
                 else:
                     # Loss means SL was hit - exit at current SL level
-                    actual_exit_price = signal.stop_loss
+                    actual_exit_price = signal.exit_price
                 
                 if actual_exit_price is not None:
                     fig.add_trace(go.Scatter(
@@ -632,7 +633,9 @@ class TradingPlotter:
                                  f"Gain: {round(getattr(signal, 'gain', 'NA'), 2) if getattr(signal, 'gain', None) is not None else 'NA'}"
                     ))
 
-    def add_fvg_rectangles(self, fig, symbol: str, timeframes: List[str] = None, date_range: tuple = None) -> None:        
+    def add_fvg_rectangles(self, fig, symbol: str, timeframes: List[str] = None, 
+                           date_range: tuple[datetime, datetime] = None, day_range: tuple[int, int] = None) -> None:        
+        
         if timeframes is None:
             timeframes = ['H1', 'M15']
         
@@ -653,7 +656,7 @@ class TradingPlotter:
             with open(cache_path, 'r', encoding='utf-8') as f:
                 fvg_data = json.load(f)
             
-            self.logger.info(f"Loaded FVG data for {symbol} from {cache_path}")
+            # self.logger.info(f"Loaded FVG data for {symbol} from {cache_path}")
             
             # Process each timeframe
             for tf, fvg_list in fvg_data.items():
@@ -663,19 +666,56 @@ class TradingPlotter:
                 if not fvg_list:
                     continue
                 
-                self.logger.info(f"Processing {len(fvg_list)} FVGs for {symbol}/{tf}")
+                # Sort FVGs by detection_time
+                sorted_fvg_list = sorted(
+                    fvg_list,
+                    key=lambda x: datetime.fromisoformat(x['detection_time'])
+                )
+                
+                # Filter by date_range if provided
+                todays_fvgs = []
+                if date_range is not None:
+                    start_date, end_date = date_range
+                    day_low, day_high = day_range
+                    
+                    for fvg in sorted_fvg_list:
+                        if fvg['low'] > day_high+((day_high-day_low)/2): continue
+                        if fvg['high'] < day_low-((day_high-day_low)/2): continue
+
+                        if end_date <= datetime.fromisoformat(fvg['bar_open_time']):
+                            continue
+                        
+                        if fvg['filled_timestamp'] is None:
+                            todays_fvgs.append(fvg)
+                            continue
+                        
+                        if start_date >= datetime.fromisoformat(fvg['filled_timestamp']):
+                            continue
+
+                        if datetime.fromisoformat(fvg['detection_time']) < start_date:
+                            fvg['detection_time'] = (start_date - timedelta(minutes=30)).isoformat()
+
+                        if datetime.fromisoformat(fvg['filled_timestamp']) > end_date:
+                            fvg['filled_timestamp'] = (end_date + timedelta(minutes=30)).isoformat()
+
+                        todays_fvgs.append(fvg)
+
+                if not sorted_fvg_list:
+                    # self.logger.info(f"No FVGs found for {symbol}/{tf} within date range")
+                    continue
+                
+                # self.logger.info(f"Processing {len(sorted_fvg_list)} FVGs for {symbol}/{tf}")
                 
                 # Draw each FVG as a rectangle
-                for idx, fvg in enumerate(fvg_list):
-                    self._draw_fvg_rectangle(fig, fvg, symbol, tf, idx)
+                for fvg in todays_fvgs:
+                    self._draw_fvg_rectangle(fig, fvg, symbol, tf)
         
         except Exception as e:
             self.logger.error(f"Error adding FVG rectangles: {e}")
             import traceback
             self.logger.error(f"Traceback: {traceback.format_exc()}")
 
-    def _draw_fvg_rectangle(self, fig, fvg: Dict[str, Any], symbol: str, 
-                            timeframe: str, index: int) -> None:
+    def _draw_fvg_rectangle(self, fig, fvg: Dict[str, Any], symbol: str, timeframe: str) -> None:
         """
         Draw a single FVG rectangle on the chart.
         
@@ -716,10 +756,10 @@ class TradingPlotter:
                     is_filled = True
                 except (ValueError, TypeError):
                     self.logger.warning(f"Invalid filled_timestamp: {filled_time_str}")
-                    end_time = datetime.now()
+                    end_time = detection_time + timedelta(days=2)
                     is_filled = False
             else:
-                end_time = datetime.now()
+                end_time = detection_time + timedelta(days=2)
                 is_filled = False
             
             # Determine color and opacity based on FVG type
@@ -854,11 +894,11 @@ class TradingPlotter:
             
             
             _multipyer_list = [s.take_profit_pips / s.stop_loss_pips for s in signals]
-            multipyer = sum(_multipyer_list) / len(_multipyer_list)
+            multipyer = sum(_multipyer_list) / len(_multipyer_list) if _multipyer_list else 0
             completed = [s for s in signals if hasattr(s, 'is_completed') and s.is_completed]
-            
+
             if completed:
-                wins = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain > 0]
+                wins = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain >= 0]
                 losses = [s for s in completed if hasattr(s, 'gain') and s.gain and s.gain < 0]
                 
                 wingains = [s.gain for s in wins if hasattr(s, 'gain') and s.gain]
@@ -904,7 +944,6 @@ class TradingPlotter:
         with open(savepath, "w", encoding="utf-8") as f:
             f.write(htmlcontent)
         
-        self.logger.info(f"Symbol comparison report saved: {savepath}")
         return str(savepath)
 
     def calculate_joint_statistics(self, all_signals: List[Signal]) -> Dict[str, Any]:
@@ -944,7 +983,6 @@ class TradingPlotter:
         seed_ts = signals_sorted[0].timestamp if signals_sorted and signals_sorted[0].timestamp else datetime.min
         equity_points.append((seed_ts, equity))
 
-
         for s in signals_sorted:
             gain = s.gain if getattr(s, "gain", None) is not None else 0.0
             equity += gain
@@ -952,9 +990,8 @@ class TradingPlotter:
             equity_points.append((ts, equity))
 
         _multipyer_list = [s.take_profit_pips / s.stop_loss_pips for s in signals_sorted]
-        multipyer = sum(_multipyer_list) / len(_multipyer_list)
+        multipyer = sum(_multipyer_list) / len(_multipyer_list) if _multipyer_list else 0.0
        
-        # Drawdown and underwater calculations
         max_dd_abs = 0.0
         max_dd_pct = 0.0
         longest_uw = timedelta(0)
@@ -994,6 +1031,39 @@ class TradingPlotter:
             last_ts = equity_points[-1][0]
             longest_uw = max(longest_uw, last_ts - current_uw_start)
 
+
+        # Group equity points by date and calculate daily P&L and drawdown
+        from collections import defaultdict
+        
+        daily_equity = defaultdict(list)  # {date: [equity_values]}
+        
+        for ts, eq in equity_points:
+            date = ts.date()
+            daily_equity[date].append(eq)
+        
+        # Calculate daily metrics
+        daily_drawdowns = []  # List of (date, dd_abs, dd_pct)
+        daily_pnl = []  # List of (date, pnl)
+        
+        sorted_dates = sorted(daily_equity.keys())
+        for date in sorted_dates:
+            day_equity_values = daily_equity[date]
+            
+            # Daily high/low equity
+            day_high = max(day_equity_values)
+            day_low = min(day_equity_values)
+
+            # Calculate drawdown from daily peak to daily low
+            daily_dd_abs = max(0.0, day_high - day_low)
+            daily_dd_pct = (daily_dd_abs / day_high) if day_high > 1e-9 else 0.0
+            
+            daily_drawdowns.append((date, daily_dd_abs, daily_dd_pct))
+            
+        
+        # Find maximum daily drawdown
+        daily_dd_abs = max((dd[1] for dd in daily_drawdowns), default=0.0)
+        daily_dd_pct = max((dd[2] for dd in daily_drawdowns), default=0.0)
+
         return {
             'total_signals': len(usable),
             'total_wins': len(wins),
@@ -1010,21 +1080,24 @@ class TradingPlotter:
             'profit_factor': (abs(sum(win_gains) / sum(loss_gains)) if loss_gains and sum(loss_gains) != 0 else float('inf')),
             'signals': all_signals,
             'initial_balance': initial_balance,
-
-            # New fields:
-            'drawdown_abs': max_dd_abs,             # currency units
-            'drawdown_pct': max_dd_pct * 100.0,     # percent of rolling peak
-            'underwater_time': longest_uw,          # timedelta
-            'final_equity': equity,                 # ending equity
+            'final_equity': equity,
+            
+            # Overall drawdown metrics
+            'drawdown_abs': max_dd_abs,
+            'drawdown_pct': max_dd_pct * 100.0,
+            'underwater_time': longest_uw,
+            
+            # Daily drawdown metrics
+            'daily_drawdown_abs': daily_dd_abs,
+            'daily_drawdown_pct': daily_dd_pct * 100.0,
         }
-
 
     def create_cumulative_chart_only(self, joint_stats: Dict) -> str:
         """Create only the joint cumulative performance chart"""
         charts_html = ""
         if joint_stats.get('signals'):
             fig_cumulative = self.create_joint_cumulative_chart(
-                                    joint_stats['signals'], joint_stats['drawdown_abs'], 
+                                    joint_stats['signals'], joint_stats['daily_drawdown_pct'], 
                                     joint_stats['drawdown_pct'], joint_stats['underwater_time'])
             
             chart_div = pyo.plot(
@@ -1043,7 +1116,7 @@ class TradingPlotter:
             """
         return charts_html
 
-    def create_joint_cumulative_chart(self, signals: List[Signal], abs_value, pct, uwt) -> go.Figure:
+    def create_joint_cumulative_chart(self, signals: List[Signal], daily_pct, pct, uwt) -> go.Figure:
         """Create joint cumulative performance chart for all signals"""
         
         fig = go.Figure()
@@ -1126,7 +1199,7 @@ class TradingPlotter:
         
         fig.update_layout(
             title={
-                'text': f'DrawDown: {round(abs_value, 1)}$    -    DrawDown pct: {round(pct, 2)}%    -    UnderWater Time: {uwt.days} days',
+                'text': f'Daily DrawDown pct: {round(daily_pct, 2)}%    -    DrawDown pct: {round(pct, 2)}%    -    UnderWater Time: {uwt.days} days',
                 'x': 0.5,
                 'xanchor': 'right'
             },
@@ -1299,8 +1372,8 @@ class TradingPlotter:
         if not joint_stats:
             return ""
         
-        win_percent = (joint_stats.get('total_profit', 0) / joint_stats.get("initial_balance", 0)) * 100
-        current_budget = joint_stats.get('total_profit', 0) + joint_stats.get('initial_balance', 0)
+        win_percent = (joint_stats.get('total_profit', 0) / joint_stats.get('initial_balance', 0)) * 100
+        current_budget = joint_stats.get('final_equity', 0)
         return f"""
         <div class="chart-section">
             <h3>Overall Performance</h3>
@@ -1313,17 +1386,17 @@ class TradingPlotter:
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{win_percent:.2f}%</div>
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Profit Percent</div>
                 </div>
-                <div style="background: rgba(231, 76, 60, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e74c3c;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${joint_stats.get('total_profit', 0):.0f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Profit</div>
-                </div>
                 <div style="background: rgba(230, 126, 34, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e67e22;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${current_budget:.0f}</div>
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Current Budget</div>
                 </div>
+                <div style="background: rgba(231, 76, 60, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e74c3c;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('daily_drawdown_pct', 0):.1f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Daily DrawDown Percent</div>
+                </div>
                 <div style="background: rgba(52, 73, 94, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #34495e;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{abs(joint_stats.get('drawdown_pct', 0)):.2f}%</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Draw Down Percent</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{abs(joint_stats.get('drawdown_pct', 0)):.1f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">DrawDown Percent</div>
                 </div>
                 <div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #9b59b6;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('total_signals', 0):.0f}</div>
@@ -1354,7 +1427,7 @@ class TradingPlotter:
             
             tablerows += f"""
             <tr>
-                <td><strong>{symbol}</strong></td>
+                <td><strong>{symbol.rstrip(".")}</strong></td>
                 <td>{stats.get('totaltrades', 0)}</td>
                 <td>{stats.get('wins', 0)}</td>
                 <td>{stats.get('losses', 0)}</td>
@@ -1397,147 +1470,141 @@ class TradingPlotter:
         </div>
         """
 
-    def generate_monthly_charts(
-        self,
-        date_range: Tuple[datetime, datetime],
-        results: Dict[str, List[Signal]],
-        reportdir: Path,
-        showmbox: bool = True,
-        show_15m_bars: bool = False
-    ) -> Dict[str, Dict[int, str]]:
+    def generate_charts(
+            self,
+            date_range: Tuple[datetime, datetime],
+            results: Dict[str, List[Signal]],
+            reportdir: Path,
+            showmbox: bool = True,
+            show_15m_bars: bool = False,
+            dispaly_timeframe: str = "M1",
+            display_range: str = "monthly" #, "daily"
+        ) -> Dict[str, Dict[str, str]]:
         """
-        Generate monthly charts for each symbol by fetching bars from MT5.
-        
-        Args:
-            date_range: Tuple of (start_date, end_date) for the backtest period
-            results: Dict mapping symbol -> list of signals
-            reportdir: The main report directory (e.g., reports/20251018_214150/)
-            showmbox: Whether to show MBox highlights
-            
-        Returns:
-            Dict mapping symbol -> month -> chart_path
-            Example: {"EURUSD": {6: "EURUSD/6.html", 7: "EURUSD/7.html"}, ...}
+        Generate daily charts for each symbol by fetching bars from MT5.
         """
         from collections import defaultdict
+        from datetime import timedelta
         from src.core.data.fetcher import DataFetcher
-        from calendar import monthrange
         
         fetcher = DataFetcher()
         start_date, end_date = date_range
 
+        if display_range not in ["daily", "monthly"]:
+            self.logger.error("Invaild display range given. Use 'monthly' or 'daily'.")
+            return defaultdict(dict)
+
         # Get all symbols from results (excluding 'all')
         symbols = [sym for sym in results.keys() if sym != "all"]
         
-        # Organize signals by symbol and month
-        symbol_monthly_signals = defaultdict(lambda: defaultdict(list))
-        
+        # Organize signals by symbol and DATE (not month)
+        symbol_date_signals = defaultdict(lambda: defaultdict(list))
         for symbol, signals in results.items():
             if symbol == "all":
                 continue
             for signal in signals:
                 if hasattr(signal, 'timestamp') and signal.timestamp:
-                    month = signal.timestamp.month
-                    symbol_monthly_signals[symbol][month].append(signal)
+                    if display_range == 'daily':
+                        display_date = signal.timestamp.date()
+                    elif display_range == 'monthly':
+                        display_date = signal.timestamp.date().replace(day=1)
+                    symbol_date_signals[symbol][display_date].append(signal)
         
-        # Generate list of months to process
-        current_date = start_date.replace(day=1)
-        months_to_process = []
+        # Generate list of dates to process
+        current_date = start_date.date()
+        dates_to_process = []
         
-        while current_date <= end_date:
-            # Get last day of this month
-            last_day = monthrange(current_date.year, current_date.month)[1]
-            month_start = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            month_end = current_date.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
-            
-            # Clip to date_range boundaries
-            if month_start < start_date:
-                month_start = start_date
-            if month_end > end_date:
-                month_end = end_date
-            
-            months_to_process.append({
-                'year': current_date.year,
-                'month': current_date.month,
-                'start': month_start,
-                'end': month_end
-            })
-            
-            # Move to next month
-            if current_date.month == 12:
-                current_date = current_date.replace(year=current_date.year + 1, month=1)
-            else:
-                current_date = current_date.replace(month=current_date.month + 1)
-        
-        # Generate charts: one directory per symbol
-        chartpaths = {}
-        
-        for symbol in sorted(symbols):
-            # Create symbol directory
-            symbol_clean = symbol.replace('.', '')
+        # Storage for chart paths - RELATIVE paths for portability
+        chartpaths = defaultdict(dict)
+
+        if display_range == "daily":
+            while current_date <= end_date.date():
+                # Create datetime objects for the entire day
+                date_start = datetime.combine(current_date, time(3, 30))
+                date_end = datetime.combine(current_date+timedelta(days=1), time(3, 30))
+                dates_to_process.append((current_date, date_start, date_end))
+                current_date += timedelta(days=1)
+
+        elif display_range == "monthly":
+            import calendar
+            def add_one_month(d: date) -> date:
+                year = d.year
+                month = d.month + 1
+                if month > 12:
+                    month = 1
+                    year += 1
+                last_day = calendar.monthrange(year, month)[1]
+                day = min(d.day, last_day)
+                return date(year, month, day)
+
+            while current_date <= end_date.date():
+                date_start = datetime.combine(current_date, time(3, 30))
+                next_month_date = add_one_month(current_date)
+                date_end = datetime.combine(next_month_date, time(3, 30))
+                dates_to_process.append((current_date, date_start, date_end))
+                current_date = next_month_date
+
+        self.logger.info(f"Processing {len(dates_to_process)} {display_range} charts for {len(symbols)} symbols")
+
+        for symbol in symbols:
+            # Create symbol directory inside reportdir
+            symbol_clean = symbol.rstrip('.').replace('/', '_')
             symboldir = reportdir / symbol_clean
             symboldir.mkdir(parents=True, exist_ok=True)
             
-            chartpaths[symbol] = {}
-            
-            # Process each month
-            for month_info in months_to_process:
-                month_num = month_info['month']
-                month_start = month_info['start']
-                month_end = month_info['end']
-                
+            # self.logger.info(f"Processing {symbol_clean}: {len(dates_to_process)} days...")
+            for date_obj, date_start, date_end in dates_to_process:
                 try:
-                    # Fetch 1-minute bars for this month
-                    self.logger.info(f"Fetching 1M bars for {symbol} - Month {month_num} ({month_start.date()} to {month_end.date()})")
+                    # Get 1-minute bars for this day
+                    # self.logger.info(f"Fetching 1M bars for {symbol_clean} - {date_obj}")
                     bars_1m = fetcher.fetch_bars_from_mt5(
-                        start_dt=month_start,
-                        end_dt=month_end,
+                        start_dt=date_start,
+                        end_dt=date_end,
                         symbol=symbol,
-                        timeframe=settings.get("data.timeframe")
+                        timeframe=dispaly_timeframe
                     )
-                    self.logger.info(f"Fetched {len(bars_1m)} bars for {symbol} - Month {month_num} ({month_start.date()} to {month_end.date()})")
-
+                    
                     if not bars_1m:
-                        self.logger.warning(f"No 1M bars found for {symbol} in month {month_num}")
+                        # self.logger.warning(f"No 1M bars found for {symbol_clean} on {date_obj}")
                         continue
                     
+                    # Fetch 15-minute bars for this date
                     if show_15m_bars:
-                        # Fetch 15-minute bars for this month
-                        self.logger.info(f"Fetching 15M bars for {symbol} - Month {month_num}")
+                        bars_15m = []
+                        # self.logger.info(f"Fetching 15M bars for {symbol_clean} - {date_obj}")
                         bars_15m = fetcher.fetch_bars_from_mt5(
-                            start_dt=month_start,
-                            end_dt=month_end,
+                            start_dt=date_start,
+                            end_dt=date_end,
                             symbol=symbol,
                             timeframe="M15"
                         )
-                        self.logger.info(f"Fetched {len(bars_15m)} bars for {symbol} - Month {month_num} ({month_start.date()} to {month_end.date()})")
+                        # self.logger.info(f"Fetched {len(bars_15m)} 15M bars for {symbol_clean} - {date_obj}")
                     
-                    # Get signals for this month
-                    month_signals = symbol_monthly_signals[symbol].get(month_num, [])
-                    
-                    # Create chart file: {symbol}/month.html
-                    chartpath = symboldir / f"{month_num}.html"
-                    
+                    # Get signals for this date
+                    date_signals = symbol_date_signals[symbol][date_obj]
+                    chartpath = symboldir / f"{date_obj}.html"
+
                     # Generate the chart
-                    self.plot_candlestick_interactive(
-                        bars=bars_1m,
-                        _15m_bars=bars_15m if show_15m_bars else [],
-                        signals=month_signals if month_signals else None,
-                        symbol=symbol,
-                        title=f"{symbol} - {month_start.strftime('%B %Y')}",
-                        show_mbox=showmbox,
-                        show_15m_bars=show_15m_bars,
-                        save_path=chartpath,
-                        return_as_div=False
-                    )
-                    
-                    # Store relative path from report.html
-                    relative_path = f"{symbol_clean}/{month_num}.html"
-                    chartpaths[symbol][month_num] = relative_path
-                    
-                    self.logger.info(f"Generated chart: {relative_path} ({len(bars_1m)} bars, {len(month_signals)} signals)")
+                    if date_signals:
+                        self.plot_candlestick_interactive(
+                            bars=bars_1m,
+                            _15m_bars=bars_15m if show_15m_bars else [],
+                            signals=date_signals if date_signals else None,
+                            symbol=symbol,
+                            title=f"{symbol_clean} - {date_obj.strftime('%Y-%m-%d')}",
+                            show_mbox=showmbox,
+                            show_15m_bars=show_15m_bars,
+                            save_path=chartpath,
+                            return_as_div=False
+                        )
+                        
+                        relative_path = f"{symbol_clean}/{date_obj}.html"
+                        chartpaths[symbol][date_obj.strftime("%Y-%m-%d")] = relative_path
+                        
+                        # self.logger.info(f"Generated chart: {relative_path} ({len(bars_1m)} bars, {len(date_signals)} signals)")
                     
                 except Exception as e:
-                    self.logger.error(f"Error generating chart for {symbol} month {month_num}: {e}")
+                    self.logger.error(f"Error generating chart for {symbol} on {date_obj}: {e}")
                     import traceback
                     self.logger.error(f"Traceback: {traceback.format_exc()}")
                     continue
@@ -1765,18 +1832,24 @@ class TradingPlotter:
             budget.apply_signal_gain(signal) if not signal.used_flag else None
             current_balance = round(budget.current_balance)
             
-            # Find chart file: symbol/month.html
+            # Find chart file
             chart_file = ""
             chart_available = False
+
             if chartpaths and hasattr(signal, 'timestamp') and signal.timestamp:
-                month = signal.timestamp.month
-                
-                # Check if we have a chart for this symbol and month
-                if symbol in chartpaths and month in chartpaths[symbol]:
-                    # Get the relative path (already stored as "SYMBOL/month.html")
-                    chart_file = chartpaths[symbol][month]
+                # exact date check
+                date_str = signal.timestamp.strftime("%Y-%m-%d")
+                if symbol in chartpaths and date_str in chartpaths[symbol]:
+                    chart_file = chartpaths[symbol][date_str]
                     chart_available = True
-            
+                else:
+                    # fallback: same year/month, day = 1
+                    first_day_dt = signal.timestamp.replace(day=1)
+                    first_day_str = first_day_dt.strftime("%Y-%m-%d")
+                    if symbol in chartpaths and first_day_str in chartpaths[symbol]:
+                        chart_file = chartpaths[symbol][first_day_str]
+                        chart_available = True
+
             # Create button
             if chart_available:
                 chart_button = f'<button class="btn-show-chart" onclick="openChart(\'{chart_file}\', \'{timestamp}\')">Show in Chart</button>'

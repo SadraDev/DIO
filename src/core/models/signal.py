@@ -16,7 +16,7 @@ class SignalOutcome(Enum):
     WIN = "win"
     LOSS = "loss"
     PENDING = "pending"
-    CANCELLED = "cancelled"
+    FORCE_STOPED = "force_stoped"
 
 class SignalType(Enum):
     """Signal type classification"""
@@ -101,7 +101,7 @@ class Signal:
     @property
     def is_completed(self) -> bool:
         """Check if signal is completed (win or loss)"""
-        return self.outcome in [SignalOutcome.WIN, SignalOutcome.LOSS]
+        return self.outcome in [SignalOutcome.WIN, SignalOutcome.LOSS, SignalOutcome.FORCE_STOPED]
 
     @property
     def has_flag(self) -> bool:
@@ -138,7 +138,7 @@ class Signal:
                         entry_price=self.entry_price, current_sl=self.stop_loss)
     
     # MAIN EVALUATION METHOD - COMPLETELY REWRITTEN WITH SINGLE LOOP
-    def evaluate_signal(self, budget = None, max_fetch_attempts: int = 5) -> Optional['Bar']:
+    def evaluate_signal(self, budget = None, force_stop_dt: datetime = None, max_fetch_attempts: int = 5) -> Optional['Bar']:
         """
         Evaluate signal outcome with SINGLE-LOOP processing and automatic bar fetching
         COMPLETELY REWRITTEN: Uses Budget for all calculations, eliminates double-looping
@@ -175,7 +175,27 @@ class Signal:
             for bar in evaluation_bars:
 
                 # === STEP 1: APPLY ORDER MANAGEMENT (if any enabled) ===
+                # if self.signal_type == SignalType.RECOVERY:
                 self.online_order_manager(bar, budget)
+
+                if force_stop_dt and bar.timestamp >= force_stop_dt:
+                    action = "SELL" if self.action == SignalAction.SELL else "BUY"
+                    self.exit_price = bar.open
+                    actual_gain = budget.calculate_gain_loss(
+                        self.symbol, self.initial_entry_price, self.exit_price,
+                        self.entry_lot, action
+                    )
+                    
+                    self.update_outcome(SignalOutcome.FORCE_STOPED, actual_gain, bar.timestamp)
+                    self.commission = self.entry_lot * commission_value
+                    self.gain -= self.commission
+
+                    log_signal_event("signal_force_stoped", self.symbol, self.action.value,
+                                    gain=actual_gain, exit_price=self.exit_price,
+                                    pips=budget.pips_from_diff(abs(self.initial_entry_price - self.exit_price)),
+                                    lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
+                                    fetch_attempts=fetch_attempts)
+                    break
 
                 # === STEP 2: CHECK FOR TP/SL HITS ===
                 if self.action == SignalAction.SELL:
@@ -281,7 +301,7 @@ class Signal:
         risk_manager = settings.get("strategies.two_hunters.flags.use_risk_manager")
         use_online_commission_manager = settings.get("strategies.two_hunters.flags.use_online_commission_manager")
         use_offline_commission_manager = settings.get("strategies.two_hunters.flags.use_offline_commission_manager")
-        commission_diff = budget.calculate_commission_diff()
+        commission_diff = 0 #budget.calculate_commission_diff()
         ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
 
         if risk_manager and bar is not None:
@@ -304,7 +324,7 @@ class Signal:
                     new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_diff
 
                     if self.stop_loss > new_sl:
-                        self.adjust_stop_loss(new_sl, "1R_favorable")
+                        # self.adjust_stop_loss(new_sl, "1R_favorable")
                         risk_free_1r_applied = True
                 
                 # 2R breakeven

@@ -48,9 +48,9 @@ class MBoxAnalyzer(BaseIndicator):
         time_flag_hour = datetime.strptime(time_flag_hour_str, "%H:%M").time()
 
         # Time of extrema in relation to 07:00 UTC
-        max_time_flag = "before" if ts_max.time() < time_flag_hour else "after"
-        min_time_flag = "before" if ts_min.time() < time_flag_hour else "after"
-        extrema_time_flag = not (max_time_flag == "before" and min_time_flag == "before")
+        max_time_flag = False if ts_max.time() < time_flag_hour else True
+        min_time_flag = False if ts_min.time() < time_flag_hour else True
+        extrema_time_flag = max_time_flag or min_time_flag
 
         self.results = {
             "max_val": max_val,

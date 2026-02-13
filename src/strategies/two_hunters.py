@@ -18,7 +18,7 @@ from src.core.data.fetcher import DataFetcher
 from src.core.utils.logger import TradingLogger, log_signal_event, log_system_event
 from config.settings import settings
 
-class TwoHuntersStrategy():
+class TwoHunters():
     """
     Two Hunters Strategy Implementation
     
@@ -397,6 +397,12 @@ class TwoHuntersStrategy():
             risk_dollars = self.budget.risk_amount() - commission_amount
             signal.entry_lot = self.budget.lots_from_diff_and_risk_amount(signal.symbol, abs(signal.entry_price - signal.stop_loss), risk_dollars)
 
+        # if signal.signal_type == SignalType.MAIN:
+        #     signal.entry_lot = signal.entry_lot / 2
+
+        # if signal.signal_type == SignalType.MAIN:
+        #     signal.used_flag = True
+
         if use_2R_for_EUR and signal.symbol == "EURUSD.":
             if signal.is_buy:
                 _2r_top = signal.entry_price + abs(signal.entry_price - signal.stop_loss) * 2
@@ -410,7 +416,7 @@ class TwoHuntersStrategy():
                 signal.take_profit = _2r_top
                 signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
 
-        if use_large_slp_flag and self.breakout_engine.type != BreakoutType.CUSTOM:
+        if use_large_slp_flag and self.breakout_engine.type == BreakoutType.DEFAULT:
             magic_number = settings.get("strategies.two_hunters.flags.large_slp_magic_number")
             condition = signal.stop_loss_pips >= magic_number
 
@@ -453,234 +459,6 @@ class TwoHuntersStrategy():
         self.signal_counter[self.symbol] += 1
         
         return signal
-    
-    def reset_daily_state(self):
-        """Reset daily state for new trading day"""
-        self.signal_counter.clear()
-        self.fake_chochs.clear()
-        # Keep recent bars but clear old ones
-        cutoff = datetime.now() - timedelta(days=2)
-        self.all_bars = [bar for bar in self.all_bars if bar.timestamp > cutoff]
-        
-        self.logger.info(f"Daily state reset for {self.symbol}")
-    
-    def get_fake_chochs(self) -> List[Dict[str, Any]]:
-        """Get detected fake CHoCH patterns"""
-        return self.fake_chochs.copy()
-    
-    def get_strategy_info(self) -> Dict[str, Any]:
-        """Get strategy configuration and state information"""
-        return {
-            "name": "Two-Hunters",
-            "symbol": self.symbol,
-            "config": self.config,
-            "system_hours": {
-                "start": self.system_hours[0].strftime("%H:%M"),
-                "end": self.system_hours[1].strftime("%H:%M")
-            },
-            "mbox_hours": {
-                "start": self.mbox_time[0].strftime("%H:%M"),
-                "end": self.mbox_time[1].strftime("%H:%M")
-            },
-            "trading_session_time": [
-                {
-                    "start": start.strftime("%H:%M"),
-                    "end": end.strftime("%H:%M")
-                }
-                for start, end in self.session_time
-            ],
-            "signal_counts": dict(self.signal_counter),
-            "bars_count": len(self.all_bars),
-            "fake_chochs_count": len(self.fake_chochs),
-            "flags": {
-                "use_trading_hours": self.use_trading_hours,
-                "use_all_flags": self.use_all_flags,
-                "use_trend_flag": self.use_trend_flag,
-                "use_time_flag": self.use_time_flag,
-                "use_choch_flag": self.use_choch_flag
-            }
-        }
-
-    def backtest(
-        self,
-        symbols: List[str],
-        start_date: datetime,
-        end_date: datetime,
-        output_dir: Optional[str] = None,
-        **args
-    ) -> Dict[str, Any]:
-        """Run backtesting on historical data with integrated plotting"""
-        logger = TradingLogger.get_backtest_logger()
-        import click
-
-        fetcher = DataFetcher()
-
-        logger.info(f"Starting backtest: {symbols} from {start_date} to {end_date}")
-        
-        log_system_event("backtest_started", 
-                        symbols=symbols, 
-                        start_date=start_date.isoformat(),
-                        end_date=end_date.isoformat(),
-                        initial_balance=self.budget.initial_balance)
-        
-        results = {}
-        for symbol in symbols:
-            results[symbol] = []
-
-        click.echo(f"Detecting FVGs...")
-        self.fvg_detector.symbols = symbols
-        self.fvg_detector.detect(start_date, end_date)
-        click.echo(f"FVGs Detected.")
-
-        try:
-            # Fetch historical data
-            self.logger.info(f"Fetching data for {symbols} from {start_date} to {end_date}")
-
-            # Process day by day
-            current_date = start_date
-            signals = []
-            days_processed = 0
-            bars_processed = 0
-            while current_date < end_date:
-                if current_date.weekday() >= 5:
-                    current_date += timedelta(days=1)
-                    continue
-                
-                current_date_start = datetime.combine(current_date.date(), self.mbox_time[0])
-                current_date_end = datetime.combine(current_date.date(), time(23, 59))
-
-                for symbol in symbols:
-                    daily_bars = fetcher.fetch_bars_from_mt5(current_date_start, current_date_end, symbol)
-                    bars_processed += len(daily_bars)
-
-                    self.budget.calculate_pip_size(symbol)
-                    self.budget.calculate_lot_size(symbol)
-                
-                    if daily_bars:
-                        self.symbol = symbol
-                        self.add_bars(daily_bars)
-                        main_signal = self.attempt_signal(current_date)
-
-                        if main_signal:
-                            main_signal.evaluate_signal(budget=self.budget)
-                            if main_signal.is_completed:
-                                results[symbol].append(main_signal)
-                                signals.append(main_signal)
-                                if self.check_strategy_flags(main_signal):
-                                    self.budget.apply_signal_gain(main_signal)
-
-                                self.logger.debug(f"Main signal completed: {main_signal.outcome.value}, "
-                                                f"Gain: {main_signal.gain}")
-                                
-                                if main_signal.outcome.value == 'loss':
-                                    
-                                    recovery_signal = self.attempt_signal(current_date, failed_signal=main_signal)
-                                    
-                                    if recovery_signal:
-                                        recovery_signal.evaluate_signal(budget=self.budget)
-                                        
-                                        if recovery_signal.is_completed:
-                                            results[symbol].append(recovery_signal)
-                                            signals.append(recovery_signal)
-                                            if self.check_strategy_flags(recovery_signal):
-                                                self.budget.apply_signal_gain(recovery_signal)
-                                            
-                                            self.logger.debug(f"Recovery signal completed: "
-                                                            f"{recovery_signal.outcome.value}, "
-                                                            f"Gain: {recovery_signal.gain}")
-                        
-                days_processed += 1
-                current_date += timedelta(days=1)
-                commission_loss = sum([s.commission for s in signals if not s.used_flag])
-                # trend_str = f" | TREND: {self.mbox_analyzer.results['trend']} CONF: {round(self.mbox_analyzer.results['trend_confidence'], 2)}"
-                click.echo(f"Date: {current_date.date()} --> Running Balance: {round(self.budget.current_balance)}$ + {round(commission_loss)}$ <--")
-            
-            # Evaluate prop status
-            self.budget.evaluate_prop_status(signals)
-
-            results["all"] = {
-                    'signals': signals,
-                    'budget': self.budget,
-                    'bars_processed': bars_processed,
-                    'days_processed': days_processed
-                }
-            
-            log_system_event("backtest_completed", 
-                            symbols=symbols,
-                            total_signals=len(signals),
-                            overall_profit=self.budget.current_balance)
-
-            click.echo("Results gathered.")
-
-            # Integrated plotting functionality
-            _generate = True
-            if not args['no_reports'] and not args['no_plots']:
-                click.echo("Generating plots and reports. This will take time..")
-                logger.info("Generating plots and reports...")
-
-            if args['no_reports'] and args['no_plots']:
-                click.echo("Generated nothing.")
-                _generate = False
-
-            if args['no_reports'] ^ args['no_plots']:
-                op = "plots" if not args['no_plots'] else "reports"
-                click.echo(f"Generating {op}..") 
-                logger.info(f"Generating {op}...")
-            
-            if _generate:
-                try:
-                    # Initialize plotter
-                    report_dir = output_dir or "reports"
-
-                    try:
-                        # Import ReportGenerator here to avoid circular imports
-                        from src.core.reporting.report_generator import ReportGenerator
-                        
-                        report_gen = ReportGenerator(report_dir)
-                        report_path = report_gen.generate_full_trading_report(
-                            symbols=symbols,
-                            date_range=(start_date, end_date),
-                            results=results,
-                            flags=args
-                        )
-                        
-                        logger.info(f"Report generated: {report_path}")
-                        click.echo(f"Generated reports for {symbols}")
-                        
-                    except Exception as e:
-                        import sys, traceback
-                        tb = traceback.extract_tb(sys.exc_info()[2])[-1]
-                        filename = tb.filename
-                        lineno = tb.lineno
-
-                        logger.error(f"Error generating reports: {e} (File: {filename}, line {lineno})")
-                    
-                except Exception as e:
-                    logger.error(f"Error in plotting integration: {e}")
-                    # Don't fail the entire backtest if plotting fails
-            
-            return results
-        
-        except Exception as e:
-            log_system_event("backtest_error", error=str(e))
-            raise
-
-    def get_magic_number_plusser(self, symbol):
-        if symbol is None:
-            return 0
-        
-        clean_symbol = symbol.rstrip('.').upper()
-
-        # JPY pairs (0.01 pip)
-        args = [
-            'USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY',
-            'NZDJPY', 'CADJPY', 'CHFJPY',
-        ]
-
-        if clean_symbol in args:
-            return 10
-        else:
-            return 1
 
     def get_london_newyork_results(
         self,
@@ -781,3 +559,150 @@ class TwoHuntersStrategy():
         except Exception as e:
             self.logger.error(f"Error fetching previous trading day session extrema: {e}")
             return {"max_val": None, "min_val": None}, {"max_val": None, "min_val": None}
+
+    def backtest(
+        self,
+        symbols: List[str],
+        start_date: datetime,
+        end_date: datetime,
+        output_dir: Optional[str] = None,
+        **args
+    ) -> Dict[str, Any]:
+        """Run backtesting on historical data with integrated plotting"""
+        logger = TradingLogger.get_backtest_logger()
+        import click
+
+        fetcher = DataFetcher()
+
+        logger.info(f"Starting backtest: {symbols} from {start_date} to {end_date}")
+        
+        log_system_event("backtest_started", 
+                        symbols=symbols, 
+                        start_date=start_date.isoformat(),
+                        end_date=end_date.isoformat(),
+                        initial_balance=self.budget.initial_balance)
+        
+        results = {}
+        for symbol in symbols:
+            results[symbol] = []
+
+        click.echo(f"Detecting FVGs...")
+        self.fvg_detector.clear_cache()
+        self.fvg_detector.symbols = symbols
+        self.fvg_detector.timeframes = ["H4"]
+        self.fvg_detector.detect(start_date, end_date)
+        # self.fvg_detector.load_fvgs_from_cache()
+        click.echo(f"FVGs Detected.")
+
+        try:
+            # Fetch historical data
+            self.logger.info(f"Fetching data for {symbols} from {start_date} to {end_date}")
+
+            # Process day by day
+            current_date = start_date
+            signals = []
+            days_processed = 0
+            bars_processed = 0
+            while current_date < end_date:
+                if current_date.weekday() >= 5:
+                    current_date += timedelta(days=1)
+                    continue
+                
+                current_date_start = datetime.combine(current_date.date(), self.mbox_time[0])
+                current_date_end = datetime.combine(current_date.date(), time(23, 59))
+
+                for symbol in symbols:
+                    daily_bars = fetcher.fetch_bars_from_mt5(current_date_start, current_date_end, symbol)
+                    bars_processed += len(daily_bars)
+
+                    self.budget.calculate_pip_size(symbol)
+                    self.budget.calculate_lot_size(symbol)
+                
+                    if daily_bars:
+                        self.symbol = symbol
+                        self.add_bars(daily_bars)
+                        main_signal = self.attempt_signal(current_date)
+
+                        if main_signal:
+                            main_signal.evaluate_signal(budget=self.budget)
+                            if main_signal.is_completed:
+                                results[symbol].append(main_signal)
+                                signals.append(main_signal)
+                                if self.check_strategy_flags(main_signal):
+                                    self.budget.apply_signal_gain(main_signal)
+
+                                    self.logger.debug(f"Main signal completed: {main_signal.outcome.value}, "
+                                                    f"Gain: {main_signal.gain}")
+                                
+                                if main_signal.outcome.value == 'loss':
+                                    
+                                    recovery_signal = self.attempt_signal(current_date, failed_signal=main_signal)
+                                    
+                                    if recovery_signal:
+                                        recovery_signal.evaluate_signal(budget=self.budget)
+                                        
+                                        if recovery_signal.is_completed:
+                                            results[symbol].append(recovery_signal)
+                                            signals.append(recovery_signal)
+                                            if self.check_strategy_flags(recovery_signal):
+                                                self.budget.apply_signal_gain(recovery_signal)
+                                            
+                                                self.logger.debug(f"Recovery signal completed: "
+                                                                f"{recovery_signal.outcome.value}, "
+                                                                f"Gain: {recovery_signal.gain}")
+                        
+                days_processed += 1
+                current_date += timedelta(days=1)
+                commission_loss = sum([s.commission for s in signals if not s.used_flag])
+                click.echo(f"Date: {current_date.date()} --> Running Balance: {round(self.budget.current_balance)}$ ~+ {round(commission_loss)}$ <--")
+            
+            # Evaluate prop status
+            self.budget.evaluate_prop_status(signals)
+
+            results["all"] = {
+                    'signals': signals,
+                    'budget': self.budget,
+                    'bars_processed': bars_processed,
+                    'days_processed': days_processed
+                }
+            
+            log_system_event("backtest_completed", 
+                            symbols=symbols,
+                            total_signals=len(signals),
+                            overall_profit=self.budget.current_balance)
+
+            click.echo("Results gathered.")
+
+            try:
+                # Initialize plotter
+                report_dir = output_dir or "reports"
+
+                # Import ReportGenerator here to avoid circular imports
+                from src.core.reporting.report_generator import ReportGenerator
+                args['dispaly_timeframe'] = 'M1'
+                args['display_range'] = 'daily'
+                
+                report_gen = ReportGenerator(report_dir)
+                report_path = report_gen.generate_reports(
+                    symbols=symbols,
+                    date_range=(start_date, end_date),
+                    results=results,
+                    flags=args
+                )
+
+            except Exception as e:
+                import sys, traceback
+                tb = traceback.extract_tb(sys.exc_info()[2])[-1]
+                filename = tb.filename
+                lineno = tb.lineno
+
+                logger.error(f"Error generating reports: {e} (File: {filename}, line {lineno})")
+            
+            return results
+        
+        except Exception as e:
+            log_system_event("backtest_error", error=str(e))
+            raise
+
+    def live(self, symbols):
+        ...

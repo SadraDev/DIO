@@ -94,7 +94,7 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
              use_offline_commission_manager, commission, balance, risk):
     
     """Run backtesting on historical data with integrated plotting"""
-    from src.strategies.two_hunters import TwoHuntersStrategy
+    from src.strategies.two_hunters import TwoHunters
     from src.core.models.budget import Budget
     from config.settings import settings
 
@@ -108,10 +108,10 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
     if not settings.get(f"{_flags_path}use_offline_commission_manager"): settings.set(f"{_flags_path}use_offline_commission_manager", use_offline_commission_manager)
     if not settings.get(f"{_flags_path}use_time_flag"): settings.set(f"{_flags_path}use_time_flag", use_time_flag)
     settings.set("account.default_risk_percent", risk) if risk is not None else None
-    settings.set("account.initial_balance", balance) if balance is not None else None
+    settings.set("account.balance", balance) if balance is not None else None
 
     budget = Budget(initial_balance=balance, initial_risk_percent=risk)
-    twohunters = TwoHuntersStrategy(budget=budget, use_trend_flag=use_trend_flag, use_time_flag=use_time_flag)
+    twohunters = TwoHunters(budget=budget, use_trend_flag=use_trend_flag, use_time_flag=use_time_flag)
 
     # Use defaults if not provided
     symbols = list(symbol) if symbol else settings.symbols
@@ -184,7 +184,7 @@ def live(ctx, symbol, risk):
     """Start live trading with the Two Hunters strategy"""
     
     from src.core.models.budget import Budget
-    from src.strategies.two_hunters import TwoHuntersStrategy
+    from src.strategies.two_hunters import TwoHunters
     
     mt5 = MT5Connection()
 
@@ -192,17 +192,17 @@ def live(ctx, symbol, risk):
     symbols = list(symbol) if symbol else settings.get('trading.symbols', ['EURUSD.', 'GBPUSD.'])
 
     # Handle risk configuration
-    risk = settings.get('account.default_risk_percent', 0.005)
+    risk = settings.get('account.default_risk_percent', 0.01)
 
     # Detect account balance
     account = mt5.get_account_info()
     if account is not None and hasattr(account, "balance"):
         balance = float(account.balance)
-        settings.set('account.initial_balance', balance)
+        settings.set('account.balance', balance)
         if not ctx.obj['quiet']:
             click.echo(f"Account balance detected from MT5: ${balance:,.2f}")
     else:
-        balance = settings.get('account.initial_balance', 10000.0)
+        balance = settings.get('account.balance', 10000.0)
         if not ctx.obj['quiet']:
             click.echo(f"Account balance fallback (config): ${balance:,.2f}")
 
@@ -216,25 +216,23 @@ def live(ctx, symbol, risk):
         click.echo("=" * 50)
 
     budget = Budget(initial_risk_percent=risk, initial_balance=balance)
-    twohunters = TwoHuntersStrategy(budget=budget)
-    
-    import signal
-    def signal_handler(signum, frame):
-            """Handle Ctrl+C gracefully"""
-            print("\n=Shuting down...")
-            print("live trading stoped.")
-            sys.exit(0)
-        
-        # Register signal handler
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    twohunters = TwoHunters(budget=budget)
     
     try:
         twohunters.live(symbols)
-    except KeyboardInterrupt:
-        print("\nLive trading interrupted by user")
+    
     except Exception as e:
-        click.echo(f"Error running live: {e}")
+        import sys, traceback
+        tb = traceback.extract_tb(sys.exc_info()[2])[-1]
+        filename = tb.filename
+        lineno = tb.lineno
+
+        click.echo(f"Backtest failed: {e} (File: {filename}, line {lineno})", err=True)
+
+        if ctx.obj['verbose']:
+            traceback.print_exc()
+
+        sys.exit(1)
     
 if __name__ == '__main__':
     two_hunters_cli()

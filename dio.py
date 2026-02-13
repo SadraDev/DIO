@@ -7,8 +7,15 @@ sys.path.insert(0, str(project_root))
 
 # Now we can import using absolute paths from project root
 from src.cli.two_hunters import two_hunters_cli
+from src.strategies.tweny import Tweny
 
 if __name__ == "__main__":
+    from datetime import datetime
+    tweny = Tweny()
+
+    # tweny.symbol = "GBPUSD."
+    # results = tweny.run(datetime(2025, 11, 1), datetime(2025, 11,  30))
+    # TODO: 1 DEC 2025; 27 NOV 2025 needs check
     two_hunters_cli()
 
-# N8N Abbas
+# TODO: FIND A BETTER WAY TO SET SL/TP FOR RECOVERY SIGNALS IN CUSTOM()

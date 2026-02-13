@@ -16,7 +16,7 @@ class ReportGenerator:
         self.plotter = TradingPlotter(str(self.report_dir))
         self.logger = TradingLogger.get_main_logger()
 
-    def generate_full_trading_report(
+    def generate_reports(
         self,
         symbols: List[str],
         date_range: Tuple[datetime, datetime],
@@ -27,19 +27,25 @@ class ReportGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         reportdir = self.report_dir / f"{timestamp}"
         reportdir.mkdir(parents=True, exist_ok=True)
-        
-        self.logger.info(f"Generating report in: {reportdir}")
-        
+
+        if not flags['no_reports'] and not flags['no_plots']:
+            self.logger.info("Generating plots and reports. This will take time..")
+
+        if flags['no_reports'] and flags['no_plots']:
+            self.logger.info("Generated nothing.")
+
         # Generate charts organized by symbol
         chartpaths = {}
         if not flags.get("no_plots"):
-            self.logger.info("Generating monthly charts for symbols separatly...")
-            chartpaths = self.plotter.generate_monthly_charts(
+            self.logger.info(f"Generating {flags.get('display_range')} charts for symbols separatly...")
+            chartpaths = self.plotter.generate_charts(
                 date_range=date_range,
                 results=results,
-                reportdir=reportdir,  # Pass report dir, not charts dir
+                reportdir=reportdir,
                 showmbox=not flags.get("no_mbox"),
-                show_15m_bars=flags.get("show_15m_bars")
+                show_15m_bars=flags.get("show_15m_bars"),
+                dispaly_timeframe=flags.get("dispaly_timeframe"),
+                display_range=flags.get("display_range")
             )
             total_charts = sum(len(months) for months in chartpaths.values())
             self.logger.info(f"Generated {total_charts} charts across {len(chartpaths)} symbols")
@@ -55,7 +61,7 @@ class ReportGenerator:
             )
         
         if not flags.get("no_plots") or not flags.get("no_reports"):
-            self.logger.info(f"Reports generated: {comparisonpath}")
+            self.logger.info(f"Report generated: {comparisonpath}")
         else:
             self.logger.info(f"Outputs logged.")
         

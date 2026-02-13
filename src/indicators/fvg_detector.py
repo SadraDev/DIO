@@ -42,7 +42,7 @@ class FVGDetector(BaseIndicator):
         self.fetcher = DataFetcher()
         self.min_gap_pips = min_gap_pips
         self.max_gap_pips = max_gap_pips
-        self.timeframes = timeframes or ["M15", "H1"]
+        self.timeframes = timeframes or ["M15", "H1", "H4"]
         
         # Get pip size from config (standard FX)
         self.pip_size = 0.0001
@@ -187,7 +187,7 @@ class FVGDetector(BaseIndicator):
                             oldest_fvg_time,
                             datetime.now(),
                             symbol,
-                            "M1",
+                            "M5",
                         )
                     else:
                         check_bars = []
@@ -229,11 +229,11 @@ class FVGDetector(BaseIndicator):
         fvg_type = fvg["type"]
         fvg_high = fvg["high"]
         fvg_low = fvg["low"]
-        detection_time = datetime.fromisoformat(fvg["detection_time"]) + timedelta(minutes=15)
+        detection_time = datetime.fromisoformat(fvg["detection_time"]) + timedelta(minutes=5)
         
         # Only check bars after detection
-        bars_after = [bar for bar in bars if bar.timestamp > detection_time]
-        
+        bars_after = [bar for bar in bars if bar.timestamp >= detection_time]
+
         for bar in bars_after:
             if fvg_type == "bullish":
                 # Bullish FVG filled when low penetrates into gap

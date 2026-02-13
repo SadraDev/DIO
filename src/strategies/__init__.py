@@ -1,3 +1,4 @@
-from .two_hunters import TwoHuntersStrategy
+from .two_hunters import TwoHunters
+from .tweny import Tweny
 
-__all__ = ['TwoHuntersStrategy']
+__all__ = ['TwoHunters', 'Tweny']

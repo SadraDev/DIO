@@ -4,6 +4,7 @@ from src.core.models.bar import Bar
 from src.core.models.signal import Signal
 from src.core.data.fetcher import DataFetcher
 from src.indicators.base import BaseIndicator
+from config.settings import settings
 from datetime import time
 from enum import Enum
 
@@ -100,6 +101,7 @@ class BreakoutEngine(BaseIndicator):
                 break
         
         def valid(bar: Bar) -> bool:
+            # return True
             if _15_first_hunt_timestamp is None: return False
             if bar.timestamp > _15_first_hunt_timestamp: return True
             return False
@@ -406,7 +408,7 @@ class BreakoutEngine(BaseIndicator):
             this_bar = session_bars[i]
             prev_bar = session_bars[i - 1]
             
-            signal_bar = self._is_order_bar(prev_bar, this_bar, breakout_direction)
+            signal_bar = self._is_order_bar(prev_bar, this_bar, breakout_direction, True)
             if signal_bar:
                 break
         
@@ -445,7 +447,7 @@ class BreakoutEngine(BaseIndicator):
             # Sort by distance from extrema price and get second nearest
             sl_candidates_sorted = sorted(sl_candidates, key=lambda x: abs(x[0] - extrema_price))
 
-            _r = abs(extrema_price - signal_bar.close)
+            _r = max(abs(extrema_price - signal_bar.close), 0.00001)
             _to_remove = []
 
             for sl_candidate in sl_candidates_sorted:
@@ -602,6 +604,8 @@ class BreakoutEngine(BaseIndicator):
                 results['take_profit'] = None  # Fallback
 
         # ===== Return results =====
+        results['take_profit'] = None
+        results['stop_loss'] = None
         return extrema_price, signal_bar, breakout_direction, breakout_bar, results
 
     def find_signal_bar(self, bars: List[Bar], hunter_bar: Bar, direction: str) -> Optional[Bar]:
@@ -617,7 +621,7 @@ class BreakoutEngine(BaseIndicator):
             this_bar = bars[i]
             prev_bar = bars[i - 1] if i > 0 else bars[0]
 
-            if self._is_order_bar(prev_bar, this_bar, direction):
+            if self._is_order_bar(prev_bar, this_bar, direction, False):
 
                 # Skip weak bars going backwards until a strong one is found
                 search_idx = i - 1
@@ -627,27 +631,29 @@ class BreakoutEngine(BaseIndicator):
                 if search_idx >= 0:
                     prev_bar = bars[search_idx]
 
-                signal = self._is_order_bar(prev_bar, this_bar, direction)
+                signal = self._is_order_bar(prev_bar, this_bar, direction, False)
                 if signal:
                     return signal
 
         return None
 
-    def _is_order_bar(self, prev_bar: Bar, this_bar: Bar, direction: str) -> Optional[Bar]:
+    def _is_order_bar(self, prev_bar: Bar, this_bar: Bar, direction: str, cunt: bool) -> Optional[Bar]:
         """
         Check if this_bar is valid for order placement based on previous bar and direction.
         """
         if this_bar.is_weak:
             return None
+        
+        _m = settings.get("strategies.two_hunters.flags.order_block_significance")
 
         if direction == 'SELL':
             # Bearish momentum confirmation
-            if this_bar.close < prev_bar.low and this_bar.is_bearish:
+            if this_bar.close < prev_bar.low - (prev_bar.range*_m) and this_bar.is_bearish:
                 return this_bar
 
         elif direction == 'BUY':
             # Bullish momentum confirmation
-            if this_bar.close > prev_bar.high and this_bar.is_bullish:
+            if this_bar.close > prev_bar.high + (prev_bar.range*_m) and this_bar.is_bullish:
                 return this_bar
 
         return None

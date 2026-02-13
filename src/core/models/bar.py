@@ -10,9 +10,9 @@ class TrendDirection(Enum):
     Used by the Bar.trendy property to classify candlestick patterns
     and their implied trend direction.
     """
-    UPTREND = "UPTREND"        # Bullish trend signal (hammer, bullish pin bar, etc.)
-    DOWNTREND = "DOWNTREND"    # Bearish trend signal (shooting star, bearish pin bar, etc.)
-    NEUTRAL = "NEUTRAL"        # Neutral/indecision signal (doji, balanced wicks, etc.)
+    UPTREND = "uptrend"        # Bullish trend signal (hammer, bullish pin bar, etc.)
+    DOWNTREND = "downtrend"    # Bearish trend signal (shooting star, bearish pin bar, etc.)
+    NEUTRAL = "neutral"        # Neutral/indecision signal (doji, balanced wicks, etc.)
 
 
 class Bar:
@@ -42,7 +42,7 @@ class Bar:
         """Calculate technical attributes of the candlestick"""
         # Basic measurements
         self.body = abs(self.close - self.open)
-        self.range = self.high - self.low  # Total range (wick to wick)
+        self.range = self.high - self.low
         self.upper_wick = self.high - max(self.open, self.close)
         self.lower_wick = min(self.open, self.close) - self.low
         
@@ -109,9 +109,9 @@ class Bar:
         body_to_range = self.body / self.range if self.body > 0 else 0.001
 
         # long wicks
-        if upperwick_to_range > 0.5:
+        if upperwick_to_range > 0.55:
             return TrendDirection.DOWNTREND
-        if lowerwick_to_range > 0.5:
+        if lowerwick_to_range > 0.55:
             return TrendDirection.UPTREND
 
         # no upperwick yes uptrend
@@ -122,19 +122,19 @@ class Bar:
         if lowerwick_to_range <= 0.08 and self.is_bearish:
             return TrendDirection.DOWNTREND
 
+        # # Simple Body > 65% uncomment if needed TODO: move to config
+        # if body_to_range >= 0.65:
+        #     if self.is_bullish:
+        #             return TrendDirection.UPTREND
+        #     if self.is_bearish:
+        #             return TrendDirection.DOWNTREND
+
         # Body > 90%
         if body_to_range >= 0.9:
             if self.is_bullish:
                     return TrendDirection.UPTREND
             if self.is_bearish:
                     return TrendDirection.DOWNTREND
-
-        # # Body > 65% SIMPLE. uncomment if needed TODO: move to config
-        # if body_to_range >= 0.65:
-        #     if self.is_bullish:
-        #             return TrendDirection.UPTREND
-        #     if self.is_bearish:
-        #             return TrendDirection.DOWNTREND
 
         # Body > 65%
         if body_to_range >= 0.65:
