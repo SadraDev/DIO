@@ -507,6 +507,58 @@ class Signal:
             "risk_free_activated": True if self.sl_adjusted_count > 0 else False,
         }
 
+    def from_dict(cls, data: dict) -> 'Signal':
+        """
+        Create Signal instance from dictionary representation.
+        Used for loading signals from JSON files.
+        """
+        from datetime import datetime
+        
+        # Parse action and signal_type enums
+        action = SignalAction(data.get('action', 'BUY'))
+        signal_type = SignalType(data.get('signal_type', 'MAIN'))
+        
+        # Create Signal instance
+        signal = cls(
+            action=action,
+            entry_price=float(data.get('entry_price', 0)),
+            stop_loss=float(data.get('stop_loss', 0)),
+            take_profit=float(data.get('take_profit', 0)),
+            symbol=data.get('symbol', ''),
+            timestamp=datetime.fromisoformat(data.get('timestamp', datetime.now().isoformat())),
+            signal_type=signal_type,
+            take_profit_pips=float(data.get('take_profit_pips')) if data.get('take_profit_pips') else None,
+            stop_loss_pips=float(data.get('stop_loss_pips')) if data.get('stop_loss_pips') else None,
+            entry_lot=float(data.get('entry_lot')) if data.get('entry_lot') else None,
+            gain=float(data.get('gain')) if data.get('gain') else None,
+            ticket=int(data.get('ticket')) if data.get('ticket') else None
+        )
+        
+        # Restore initial values (for risk-free tracking)
+        signal.initial_entry_price = float(data.get('initial_entry_price', signal.entry_price))
+        signal.initial_stop_loss = float(data.get('initial_stop_loss', signal.stop_loss))
+        signal.initial_take_profit = float(data.get('initial_take_profit', signal.take_profit))
+        
+        # Restore outcome if present
+        if data.get('outcome'):
+            signal.outcome = SignalOutcome(data['outcome'])
+        if data.get('outcome_timestamp'):
+            signal.outcome_timestamp = datetime.fromisoformat(data['outcome_timestamp'])
+        
+        # Restore other fields
+        signal.exit_pips = float(data.get('exit_pips')) if data.get('exit_pips') else None
+        signal.exit_price = float(data.get('exit_price')) if data.get('exit_price') else None
+        signal.commission = float(data.get('commission')) if data.get('commission') else None
+        signal.ticket = int(data.get('ticket')) if data.get('ticket') else None
+        
+        # Restore flags
+        signal.trend = data.get('trend')
+        signal.fake_choch = data.get('fake_choch')
+        signal.time_flag = data.get('time_flag')
+        signal.used_flag = data.get('used_flag', False)
+        signal.sl_adjusted_count = int(data.get('sl_adjusted_count', 0))
+        
+        return signal
     
     def __repr__(self):
         outcome_str = f" {self.outcome.value.upper()}" if self.outcome else " PENDING"

@@ -5,7 +5,7 @@ from src.core.models.signal import Signal
 from src.core.data.fetcher import DataFetcher
 from src.indicators.base import BaseIndicator
 from config.settings import settings
-from datetime import time
+from datetime import datetime, time, timedelta
 from enum import Enum
 
 class BreakoutType(Enum):
@@ -26,6 +26,13 @@ class BreakoutEngine(BaseIndicator):
         self.fetcher = DataFetcher()
         self.fvg_detector = FVGDetector()
         self.symbol = symbol
+
+    def _get_mbox_end_time(self) -> time:
+        """Get session hours from config"""
+        mbox_time_config = settings.get("strategies.two_hunters.mbox_time", {})
+        
+        end_time = datetime.strptime(mbox_time_config["end"], "%H:%M").time()
+        return end_time
 
     def breakout(
         self,
@@ -80,7 +87,7 @@ class BreakoutEngine(BaseIndicator):
             if i + lookahead >= m:
                 break
 
-            if bar.timestamp.time() < time(hour=13, minute=29):
+            if bar.timestamp.time() < self._get_mbox_end_time() + timedelta(hours=1):
                 continue
 
             current_max = bar.high
@@ -125,7 +132,7 @@ class BreakoutEngine(BaseIndicator):
                 breakout_stage_up += 1
                 max_val = current_max
 
-                if bar.timestamp.time() < time(hour=13, minute=29):
+                if bar.timestamp.time() < self._get_mbox_end_time() + timedelta(hours=1):
                     self.num_hunt += 1
 
                 if breakout_stage_up >= self.num_hunt:
@@ -143,7 +150,7 @@ class BreakoutEngine(BaseIndicator):
                 breakout_stage_down += 1
                 min_val = current_min
 
-                if bar.timestamp.time() < time(hour=13, minute=29):
+                if bar.timestamp.time() < self._get_mbox_end_time() + timedelta(hours=1):
                     self.num_hunt += 1
 
                 if breakout_stage_down >= self.num_hunt:

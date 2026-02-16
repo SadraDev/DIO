@@ -1,7 +1,7 @@
-
+from src.core.utils.logger import TradingLogger
 import MetaTrader5 as mt5
 from typing import List, Union, Sequence, Optional, Dict
-import datetime as dt
+from datetime import datetime
 import csv
 import os
 from src.core.models.bar import Bar
@@ -24,6 +24,7 @@ class DataFetcher:
         }
         self.default_timeframe = self.timeframe_map.get("M1", mt5.TIMEFRAME_M1)
         self.connection_timeout = 30
+        self.logger = TradingLogger.get_main_logger()
     
     def ensure_connection(self) -> bool:
         """Ensure MT5 connection is active."""
@@ -43,8 +44,8 @@ class DataFetcher:
     
     def fetch_bars_from_mt5(
         self,
-        start_dt: dt.datetime,
-        end_dt: dt.datetime,
+        start_dt: datetime,
+        end_dt: datetime,
         symbol: str,
         timeframe: Optional[str] = None,
     ) -> List[Bar]:
@@ -78,7 +79,7 @@ class DataFetcher:
             bars = []
             for rate in rates:
                 bar = Bar(
-                    timestamp=dt.datetime.fromtimestamp(int(rate['time'])),
+                    timestamp=datetime.fromtimestamp(int(rate['time'])),
                     open_price=float(rate['open']),
                     high=float(rate['high']),
                     low=float(rate['low']),
@@ -141,12 +142,89 @@ class DataFetcher:
                 self.close_connection()
             except:
                 pass
-    
+
+    def get_latest_bars(self, symbol: str, timeframe: int = mt5.TIMEFRAME_M1, count: int = 1) -> List[Bar]:
+        """
+        Fetch latest OHLC bars for a symbol and convert to Bar objects.
+        
+        Args:
+            symbol: Asset symbol (e.g., "EURUSD")
+            timeframe: MT5 timeframe constant (e.g., mt5.TIMEFRAME_H1)
+            count: Number of bars to fetch (default 100)
+            
+        Returns:
+            List[Bar]: List of Bar objects ordered from oldest to newest.
+        """
+        if not self.ensure_connection():
+            return []
+
+        try:
+            # Ensure symbol is selected in Market Watch to prevent data gaps
+            if not mt5.symbol_select(symbol, True):
+                self.logger.warning(f"Symbol {symbol} not found or cannot be selected")
+                return []
+
+            # Fetch rates starting from index 0 (current forming candle)
+            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+            
+            if rates is None or len(rates) == 0:
+                self.logger.warning(f"No rates returned for {symbol}")
+                return []
+
+            bars = []
+            for rate in rates:
+                # Convert MT5 timestamp (seconds) to datetime
+                # Matches your existing logic in get_today_signals
+                dt = datetime.fromtimestamp(int(rate['time']))
+                
+                # Create Bar instance
+                # Note: Using tick_volume as it's standard for Forex/CFDs
+                bar = Bar(
+                    timestamp=dt,
+                    open_price=float(rate['open']),
+                    high=float(rate['high']),
+                    low=float(rate['low']),
+                    close=float(rate['close']),
+                    volume=float(rate['tick_volume']) 
+                )
+                bars.append(bar)
+
+            return bars
+
+        except Exception as e:
+            self.logger.error(f"Error fetching bars for {symbol}: {e}")
+            return []
+
+    def get_current_price(self, symbol: str) -> Optional[dict]:
+        """
+        Get the absolute latest real-time tick (Bid/Ask).
+        Useful for precise order entry validation.
+        """
+        if not self.ensure_connection():
+            return None
+            
+        try:
+            tick = mt5.symbol_info_tick(symbol)
+            if not tick:
+                self.logger.warning(f"Tick data unavailable for {symbol}")
+                return None
+                
+            return {
+                "bid": tick.bid,
+                "ask": tick.ask,
+                "time": datetime.fromtimestamp(tick.time),
+                "spread": abs(tick.bid - tick.ask)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching tick for {symbol}: {e}")
+            return None
+
     def fetch_rates_to_csv(
         self,
         symbols: Union[str, Sequence[str]],
-        start_dt: dt.datetime,
-        end_dt: dt.datetime,
+        start_dt: datetime,
+        end_dt: datetime,
         timeframe: Optional[str] = None,
         output_dir: Optional[str] = None,
         chunk_days: int = 30,
@@ -199,7 +277,7 @@ class DataFetcher:
                     
                     # Chunk the range to avoid None returns for very large requests
                     cur_from = start_dt
-                    delta = dt.timedelta(days=chunk_days)
+                    delta = datetime.timedelta(days=chunk_days)
                     total_rows = 0
                     
                     while cur_from < end_dt:

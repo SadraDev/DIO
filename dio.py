@@ -11,7 +11,7 @@ from src.strategies.tweny import Tweny
 
 if __name__ == "__main__":
     from datetime import datetime
-    tweny = Tweny()
+    # tweny = Tweny()
 
     # tweny.symbol = "GBPUSD."
     # results = tweny.run(datetime(2025, 11, 1), datetime(2025, 11,  30))

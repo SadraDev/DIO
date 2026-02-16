@@ -51,7 +51,7 @@ class Settings:
         """Validate configuration values"""
         required_fields = [
             'system.name',
-            'account.initial_balance', 
+            'account.balance', 
             'trading.symbols',
             'market.standard_pip_size',
             'mt5.magic_number'
@@ -62,8 +62,8 @@ class Settings:
                 raise ValueError(f"Required configuration field missing: {field}")
         
         # Validate value ranges
-        if self.get('account.initial_balance', 0) <= 0:
-            raise ValueError("initial_balance must be positive")
+        if self.get('account.balance', 0) <= 0:
+            raise ValueError("balance must be positive")
         
         if not isinstance(self.get('trading.symbols', []), list):
             raise ValueError("trading.symbols must be a list")
@@ -176,8 +176,8 @@ class Settings:
         return self.get('trading.symbols', ['EURUSD', 'GBPUSD'])
     
     @property
-    def initial_balance(self) -> float:
-        return self.get('account.initial_balance', 10000)
+    def balance(self) -> float:
+        return self.get('account.balance', 10000)
     
     @property
     def default_risk_percent(self) -> float:

@@ -1244,7 +1244,7 @@ class TradingPlotter:
         use_2R_for_EUR = settings.get("strategies.two_hunters.flags.use_2r_for_eur")
         use_large_slp_flag = settings.get("strategies.two_hunters.flags.use_large_slp_flag")
         use_time_flag = settings.get("strategies.two_hunters.flags.use_time_flag")
-        balance = settings.get("account.initial_balance")
+        balance = settings.get("account.balance")
 
         # Helper to generate badge HTML
         def create_badge(label, value, is_active, icon=""):
