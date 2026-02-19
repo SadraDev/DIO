@@ -304,8 +304,8 @@ class MT5Connection:
             return []
         
         try:
-            from_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            to_time = datetime.now()
+            from_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            to_time = datetime.now() + timedelta(days=1)
             
             deals = mt5.history_deals_get(from_time, to_time)
             if not deals:
@@ -347,7 +347,7 @@ class MT5Connection:
                         ticket=entry_deal.order
                     )
                     
-                    signal.outcome = "win" if deal.profit >= 0 else "loss"
+                    signal.outcome = SignalOutcome.WIN if deal.profit >= 0 else SignalOutcome.LOSS
                     signal.outcome_timestamp = datetime.fromtimestamp(deal.time)
                     
                     signals.append(signal)

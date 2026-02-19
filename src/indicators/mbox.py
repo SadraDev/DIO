@@ -40,7 +40,7 @@ class MBoxAnalyzer(BaseIndicator):
 
         # Analyze overall trend and confidence
         if len(bars) < 20:
-            return False, 0.0
+            return {}
         detector = create_trend_detector('consensus')
         trend_detected, direction, confidence = detector.detect(bars)
 

@@ -159,11 +159,6 @@ class DataFetcher:
             return []
 
         try:
-            # Ensure symbol is selected in Market Watch to prevent data gaps
-            if not mt5.symbol_select(symbol, True):
-                self.logger.warning(f"Symbol {symbol} not found or cannot be selected")
-                return []
-
             # Fetch rates starting from index 0 (current forming candle)
             rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
             

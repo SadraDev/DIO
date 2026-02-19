@@ -563,9 +563,8 @@ class Signal:
     def __repr__(self):
         outcome_str = f" {self.outcome.value.upper()}" if self.outcome else " PENDING"
         gain_str = f" Gain: ${self.gain:.2f}" if self.gain is not None else ""
-        return (f"Signal({self.symbol} {self.action.value} @ {self.entry_price:.5f} "
-                f"SL:{self.stop_loss:.5f} TP:{self.take_profit:.5f} "
-                f"{self.timestamp.strftime('%Y-%m-%d %H:%M')}{outcome_str}{gain_str})")
+        return (f"Signal({self.timestamp.strftime('%Y-%m-%d %H:%M')} {self.symbol} {self.action.value} "
+                f"@ {self.entry_price:.5f} Lot:{self.entry_lot:.2f} {outcome_str}{gain_str})")
     
     def __str__(self):
         return self.__repr__()

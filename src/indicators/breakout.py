@@ -27,12 +27,12 @@ class BreakoutEngine(BaseIndicator):
         self.fvg_detector = FVGDetector()
         self.symbol = symbol
 
-    def _get_mbox_end_time(self) -> time:
+    def _get_threshold_time(self) -> time:
         """Get session hours from config"""
         mbox_time_config = settings.get("strategies.two_hunters.mbox_time", {})
-        
-        end_time = datetime.strptime(mbox_time_config["end"], "%H:%M").time()
-        return end_time
+        end_time = datetime.strptime(mbox_time_config["end"], "%H:%M")
+        threshold = end_time + timedelta(hours=1)
+        return threshold.time()
 
     def breakout(
         self,
@@ -87,7 +87,7 @@ class BreakoutEngine(BaseIndicator):
             if i + lookahead >= m:
                 break
 
-            if bar.timestamp.time() < self._get_mbox_end_time() + timedelta(hours=1):
+            if bar.timestamp.time() < self._get_threshold_time():
                 continue
 
             current_max = bar.high
@@ -132,7 +132,7 @@ class BreakoutEngine(BaseIndicator):
                 breakout_stage_up += 1
                 max_val = current_max
 
-                if bar.timestamp.time() < self._get_mbox_end_time() + timedelta(hours=1):
+                if bar.timestamp.time() < self._get_threshold_time():
                     self.num_hunt += 1
 
                 if breakout_stage_up >= self.num_hunt:
@@ -150,7 +150,7 @@ class BreakoutEngine(BaseIndicator):
                 breakout_stage_down += 1
                 min_val = current_min
 
-                if bar.timestamp.time() < self._get_mbox_end_time() + timedelta(hours=1):
+                if bar.timestamp.time() < self._get_threshold_time():
                     self.num_hunt += 1
 
                 if breakout_stage_down >= self.num_hunt:

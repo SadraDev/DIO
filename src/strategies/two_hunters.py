@@ -76,6 +76,8 @@ class TwoHunters():
         self.mbox_time = self._get_mbox_time()
         self.session_time = self._get_session_time()
         
+        self.mbox_result = {}
+
         # Strategy parameters (from config)
         self.max_signals_per_symbol = settings.max_signals_per_symbol
         self.margin_pips = self.config.get("margin_pips")
@@ -310,7 +312,7 @@ class TwoHunters():
             return None
         
         # Analyze MBox for market bias
-        mbox_result = self.mbox_analyzer.calculate(mbox_bars)
+        mbox_result = self.mbox_result if self.mbox_result else self.mbox_analyzer.calculate(mbox_bars)
         self.breakout_engine.symbol = self.symbol
 
         # Hunt for breakout
@@ -399,12 +401,6 @@ class TwoHunters():
             commission_amount = onhand_lot_size * commission
             risk_dollars = self.budget.risk_amount() - commission_amount
             signal.entry_lot = self.budget.lots_from_diff_and_risk_amount(signal.symbol, abs(signal.entry_price - signal.stop_loss), risk_dollars)
-
-        # if signal.signal_type == SignalType.MAIN:
-        #     signal.entry_lot = signal.entry_lot / 2
-
-        # if signal.signal_type == SignalType.MAIN:
-        #     signal.used_flag = True
 
         if use_2R_for_EUR and signal.symbol == "EURUSD.":
             if signal.is_buy:
@@ -707,20 +703,12 @@ class TwoHunters():
             log_system_event("backtest_error", error=str(e))
             raise
 
-    def live(self, check_interval=5, stop_event=None):
+    def live(self, check_interval=1, stop_event=None):
         """
         Live trading execution for a single symbol.
-        
-        1. Loads today's signals from JSON (if system restarted)
-        2. Fetches bars from MT5
-        3. Validates bar completion
-        4. Runs attempt_signal() on new bars
-        5. Places orders and saves JSON signals
-        6. Prevents multiple signals per day
         """
         from src.core.data.fetcher import DataFetcher
         import json
-        import time
         from datetime import datetime
         from pathlib import Path
         
@@ -730,11 +718,16 @@ class TwoHunters():
         
         self.logger.info(f"Starting live trading for {self.symbol}")
         
-        last_bar_time = None
         last_signal_date = None
+        signal = None
 
         self.budget.calculate_pip_size(self.symbol)
         self.budget.calculate_lot_size(self.symbol)
+        self.mbox_result = self.mbox_analyzer.calculate(
+            self.get_mbox_bars(
+                fetcher.get_latest_bars(self.symbol)[-1].timestamp
+            )
+        )
 
         # Load today's signals from JSON to prevent restart-induced duplicates
         try:
@@ -756,12 +749,13 @@ class TwoHunters():
                             
                             # Reconstruct Signal object using from_dict
                             loaded_signal = Signal.from_dict(cls=Signal, data=signal_data)
-                            self.logger.info(
+                            self.logger.warning(
                                 f"Loaded today's signal from {signal_file.name}: "
                                 f"{loaded_signal.action.value} @ {loaded_signal.entry_price}"
                             )
                             
                             last_signal_date = current_date
+                            signal = loaded_signal  # Set the loaded signal as the current signal to skip generation
                             today_signals_found = True
                             
                 except Exception as e:
@@ -769,7 +763,7 @@ class TwoHunters():
                     continue
             
             if today_signals_found:
-                self.logger.info(
+                self.logger.warning(
                     f"Today's signals loaded for {self.symbol}. "
                     f"Will skip signal generation until next day."
                 )
@@ -780,31 +774,39 @@ class TwoHunters():
 
         try:
             while not (stop_event and stop_event.is_set()):
-                current_time = fetcher.get_latest_bars(self.symbol)[-1].timestamp
-                current_date = current_time.date()
+                current_bar_list = fetcher.get_latest_bars(self.symbol)
+                if current_bar_list:
+                    current_datetime = current_bar_list[-1].timestamp
+                    current_date = current_datetime.date()
+                else:
+                    goodtimes.sleep(check_interval)
+                    continue
                 
                 # Check daily signal limit
                 if last_signal_date == current_date:
-                    self.logger.debug(
+                    self.logger.warning(
                         f"{self.symbol}: Signal already generated today, "
-                        f"skipping until next day"
+                        f"skipping until next day, "
+                        f"{signal}"
                     )
+                    check_interval = 1800  # Increase check interval to reduce load until next day
+                    recent_orders = self.mt5.get_today_signals()
+                    for sig in recent_orders:
+                        if sig.ticket == signal.ticket:
+                            signal = sig  # Update signal with latest order info
+                            break
                     goodtimes.sleep(check_interval)
                     continue
                 
                 # Fetch and update bars
-                new_bars = self._fetch_and_update_bars(
+                self._fetch_and_update_bars(
                     symbol=self.symbol,
                     fetcher=fetcher,
-                    last_bar_time=last_bar_time
+                    last_bar_time=self.all_bars[-1].timestamp if self.all_bars else None
                 )
                 
-                if not new_bars:
-                    goodtimes.sleep(check_interval)
-                    continue
-                
                 # Attempt signal
-                signal = self.attempt_signal(current_time)
+                signal = self.attempt_signal(current_datetime)
                 
                 if signal is None:
                     goodtimes.sleep(check_interval)
@@ -815,11 +817,15 @@ class TwoHunters():
                 
                 if not order_placed:
                     self.logger.warning(
-                        f"Failed to place order for {self.symbol}"
+                        f"Failed to place order: {signal}"
                     )
                     goodtimes.sleep(check_interval)
                     continue
-                
+                else:
+                    self.logger.warning(
+                        f"Order placed successfully: {signal}"
+                    )
+
                 # Save signal JSON using to_dict()
                 signal_data = signal.to_dict()
                 signal_filename = (
@@ -864,28 +870,24 @@ class TwoHunters():
                 self.logger.info(f"Initializing bars for {symbol} with MBox history...")
                 
                 try:
-                    from datetime import datetime, timedelta
-                    import MetaTrader5 as mt5
                     
                     # Get current time from broker
-                    current_bars = fetcher.get_latest_bars(
-                        symbol=symbol,
-                        timeframe=mt5.TIMEFRAME_M1,
-                        count=1
-                    )
+                    current_bars = fetcher.get_latest_bars(symbol=symbol)
                     
                     if not current_bars:
                         self.logger.warning(f"Could not fetch current time for {symbol}")
                         return []
                     
+                    # get current broker time from latest bar
                     current_broker_time = current_bars[-1].timestamp
                     
                     # Calculate MBox start (04:30 in broker timezone)
-                    mbox_start_time = current_broker_time.replace(hour=4, minute=30, second=0, microsecond=0)
-                    
+                    mbox_start_str = settings.get('strategies.two_hunters.mbox_time.start', '04:30')
+                    mbox_start_datetime = datetime.combine(current_broker_time.date(), datetime.strptime(mbox_start_str, '%H:%M').time())
+
                     # Fetch bars from MBox start to now
                     mbox_bars = fetcher.fetch_bars_from_mt5(
-                        start_dt=mbox_start_time,
+                        start_dt=mbox_start_datetime,
                         end_dt=current_broker_time,
                         symbol=symbol,
                         timeframe='M1'
@@ -894,8 +896,8 @@ class TwoHunters():
                     if mbox_bars:
                         self.all_bars.extend(mbox_bars)
                         self.logger.info(
-                            f"Loaded {len(mbox_bars)} MBox bars for {symbol} "
-                            f"from {mbox_start_time} to {current_broker_time}"
+                            f"Loaded {len(mbox_bars)} bars for {symbol} "
+                            f"from {mbox_start_datetime} to {current_broker_time}"
                         )
                     else:
                         self.logger.warning(f"No MBox bars fetched for {symbol}")
@@ -907,13 +909,13 @@ class TwoHunters():
             # Normal bar fetching
             fetched_bars = fetcher.get_latest_bars(
                 symbol=symbol,
-                count=20
+                count=10  # Fetch last 10 bars to ensure we get the latest completed one especially if we missed some during dowontime
             )
             
             if not fetched_bars:
+                self.logger.warning(f"Could not fetch latest bars for {symbol}")
                 return []
             
-            new_bars = []
             current_time = fetched_bars[-1].timestamp
             
             for bar in fetched_bars:
@@ -931,16 +933,13 @@ class TwoHunters():
                 
                 # Add to strategy
                 self.all_bars.append(bar)
-                new_bars.append(bar)
                 
                 self.logger.debug(
                     f"Bar added {symbol}: "
                     f"{bar.timestamp.strftime('%Y-%m-%d %H:%M:%S')} "
                     f"O:{bar.open:.5f} C:{bar.close:.5f}"
                 )
-            
-            return new_bars
-        
+
         except Exception as e:
             self.logger.error(f"Error fetching bars for {symbol}: {e}")
             return []

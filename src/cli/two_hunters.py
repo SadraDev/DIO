@@ -362,15 +362,21 @@ def live(ctx, symbol, risk, max_concurrent, check_interval, enable_monitoring):
                 # Case 1: mbox_end hasn't arrived yet today - wait for it
                 if mbox_end_datetime > current_time:
                     wait_seconds = (mbox_end_datetime - current_time).total_seconds()
-                    next_event = mbox_end_datetime
-                # Case 2: mbox_end has passed - wait for tomorrow's mbox_start
+                # Case 2: session_end has passed - wait for tomorrow's mbox_end
                 else:
-                    mbox_start_tomorrow = datetime.combine(
-                        current_time.date() + timedelta(days=1),
-                        mbox_start
-                    )
-                    wait_seconds = (mbox_start_tomorrow - current_time).total_seconds()
-                    next_event = mbox_start_tomorrow
+                    mbox_end_datetime += timedelta(days=1)
+                    wait_seconds = (mbox_end_datetime - current_time).total_seconds()                
+                
+                # Show most recent orders placed
+                recent_orders = mt5_connection.get_today_signals()  # Reuse existing method for today's completed signals
+                if recent_orders and not ctx.obj.get('quiet'):
+                    click.echo(f"[{current_time.strftime('%H:%M:%S')}] Recent orders today ({len(recent_orders)}):")
+                    for sig in sorted(recent_orders, key=lambda s: s.timestamp, reverse=True)[:1]:  # Top 1 newest
+                        outcome = sig.outcome if sig.outcome else "PENDING"
+                        click.echo(f"  {sig.symbol} {sig.action.value} @ {sig.entry_price:.5f} "
+                                f"(lot: {sig.entry_lot:.2f}, gain: ${sig.gain:.2f}, "
+                                f"outcome: {outcome}, time: {sig.timestamp.strftime('%H:%M')})")
+                    click.echo("")  # Spacer
                 
                 if not ctx.obj.get('quiet'):
                     hours = int(wait_seconds // 3600)
@@ -380,8 +386,11 @@ def live(ctx, symbol, risk, max_concurrent, check_interval, enable_monitoring):
                         f"Outside trading window. Next in {hours}h {minutes}m"
                     )
                 
-                # Sleep (max 1 minute to stay responsive)
-                time.sleep(min(wait_seconds, 60))
+                # Sleep (until next trading window - but wake up 5 minutes before to recheck)
+                if wait_seconds > 300:
+                    time.sleep(wait_seconds - 300)
+                else:
+                    time.sleep(60)
 
     
     except KeyboardInterrupt:
@@ -434,6 +443,7 @@ def _run_symbol_live_trading(
     logger = TradingLogger.get_trading_logger()
     
     try:
+        two_hunters.all_bars = []  # Initialize bars list for the symbol
         two_hunters.live(
             check_interval=check_interval,
             stop_event=stop_event
