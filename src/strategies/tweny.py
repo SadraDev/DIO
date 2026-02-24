@@ -56,6 +56,16 @@ class Tweny:
         Detect FVGs by scanning consecutive 3-bar patterns.
         """
         
+        self.fvg_detector.load_fvgs_from_cache()  # Load existing FVGs for this symbol/timeframe
+        if len(self.fvg_detector.fvgs[self.symbol][self.timeframe]) > 0:
+            self.detected_fvgs.extend(self.fvg_detector.fvgs[self.symbol][self.timeframe])
+            self.budget.calculate_pip_size(self.symbol)
+            self.logger.info(
+                f"Loaded {len(self.fvg_detector.fvgs[self.symbol][self.timeframe])} "
+                f"cached FVGs for {self.symbol} {self.timeframe}"
+            )
+            return None
+
         self.logger.info(f"Fetching {self.timeframe} bars...")
         bars = self.fetcher.fetch_bars_from_mt5(
             start_dt=start_date,
@@ -162,6 +172,7 @@ class Tweny:
             entry = bar.close
             r = abs(entry - extrema)
 
+            # print(_n, _m, r)
             sl = extrema - (_n*r)
             tp = entry + _m*r
             
@@ -213,85 +224,95 @@ class Tweny:
 
     def _pre_process_fvgs(self):
         fvgs = self.detected_fvgs
-        _pips_to_widen = self.config.get("pips_to_widen_fgvs")
+        pips_to_widen = self.config.get('pips_to_widen_fgvs')
 
-        # Widen fvgs
-        for fvg in fvgs:
-            fvg["high"] += self.budget.diff_from_pips(_pips_to_widen)
-            fvg["low"]  -= self.budget.diff_from_pips(_pips_to_widen)
-            fvg["size_pips"] += 2*_pips_to_widen
+        # # ── Step 1: Widen every FVG ────────────────────────────────────────────────
+        # for fvg in fvgs:
+        #     fvg['high']      += self.budget.diff_from_pips(pips_to_widen)
+        #     fvg['low']       -= self.budget.diff_from_pips(pips_to_widen)
+        #     fvg['size_pips'] += 2 * pips_to_widen
 
-        # merge same-type FVGs closer than 1.6 pips
-        merged_fvgs = []
-        used = set()
+        # ── Step 2: Sort by detection time ────────────────────────────────────────
+        fvgs_sorted = sorted(fvgs, key=lambda x: x.get('detection_time', ''))
 
-        # Helper function
-        def fvg_distance_pips(a, b) -> float:
-            # distance between closest vertical edges
-            if a["high"] < b["low"]:
-                diff = b["low"] - a["high"]
-            elif b["high"] < a["low"]:
-                diff = a["low"] - b["high"]
-            else:
-                # overlapping (or touching): treat as zero distance
-                diff = 0.0
-            return self.budget.pips_from_diff(diff)
-        
-        n = len(fvgs)
+        # ── Step 3: Temporally cluster same-type FVGs within 1h 30m ───────────────
+        TIME_WINDOW = timedelta(hours=1, minutes=30)
+        merged_fvgs: list = []
+        used: set = set()
+        n = len(fvgs_sorted)
+
         for i in range(n):
             if i in used:
                 continue
 
-            base = fvgs[i]
-            same_cluster = [base]
+            base       = fvgs_sorted[i]
+            base_type  = base.get('type')
+            base_time  = datetime.fromisoformat(base.get('detection_time'))
+            cluster    = [base]
             used.add(i)
 
             for j in range(i + 1, n):
                 if j in used:
                     continue
-                other = fvgs[j]
-                # only merge same type
-                if other.get("type") != base.get("type"):
+                other = fvgs_sorted[j]
+
+                # Only group same-direction FVGs
+                if other.get('type') != base_type:
                     continue
 
-                if base.get("filled_timestamp") is not None:
-                    if datetime.fromisoformat(other.get("detection_time")) > datetime.fromisoformat(base.get("filled_timestamp")):
-                        continue
+                other_time = datetime.fromisoformat(other.get('detection_time'))
 
-                if fvg_distance_pips(base, other) <= self.config.get("pips_to_merge_fgvs"):
-                    same_cluster.append(other)
+                # Anchor the window at the cluster's first (earliest) FVG
+                if (other_time - base_time) <= TIME_WINDOW:
+                    cluster.append(other)
                     used.add(j)
 
-            if len(same_cluster) == 1:
+            # ── Single FVG: keep as-is ─────────────────────────────────────────
+            if len(cluster) == 1:
                 merged_fvgs.append(base)
-            else:
-                # combine into one FVG covering full range
-                high = max(f["high"] for f in same_cluster)
-                low = min(f["low"] for f in same_cluster)
-                size_pips = self.budget.pips_from_diff(high - low)
+                continue
 
-                # base FVG for metadata
-                combined = dict(base)
-                combined["high"] = high
-                combined["low"] = low
-                combined["size_pips"] = size_pips
+            # ── Multiple FVGs: combine into one spanning FVG ───────────────────
+            high = max(f['high'] for f in cluster)
+            low  = min(f['low']  for f in cluster)
 
-                # timestamps as minimums in cluster
-                combined["bar_open_time"] = min(
-                    f.get("bar_open_time") for f in same_cluster if f.get("bar_open_time") is not None
-                )
-                combined["detection_time"] = min(
-                    f.get("detection_time") for f in same_cluster if f.get("detection_time") is not None
-                )
-                # filled_timestamp: minimum non-None, or None if all None
-                filled_candidates = [f.get("filled_timestamp") for f in same_cluster if f.get("filled_timestamp") is not None]
-                combined["filled_timestamp"] = min(filled_candidates) if filled_candidates else None
+            combined = dict(base)   # inherit metadata from earliest FVG in cluster
+            combined['high']      = high
+            combined['low']       = low
+            combined['size_pips'] = self.budget.pips_from_diff(high - low)
 
-                merged_fvgs.append(combined)
+            # Use the earliest timestamps across all members
+            combined['bar_open_time'] = min(
+                f.get('bar_open_time')
+                for f in cluster if f.get('bar_open_time') is not None
+            )
+            combined['detection_time'] = min(
+                f.get('detection_time')
+                for f in cluster if f.get('detection_time') is not None
+            )
 
+            # filled_timestamp: earliest non-None, or None if none are filled yet
+            filled_candidates = [
+                f.get('filled_timestamp')
+                for f in cluster if f.get('filled_timestamp') is not None
+            ]
+            combined['filled_timestamp'] = min(filled_candidates) if filled_candidates else None
+
+            merged_fvgs.append(combined)
+
+        # ── Step 4: Persist result ────────────────────────────────────────────────
         self.detected_fvgs = merged_fvgs
-        self.logger.info(f"Merged FVGs to {len(self.detected_fvgs)}.")
 
+        # Sync merged FVGs into the FVGDetector's internal store,
+        # then flush to the JSON cache on disk.
+        self.fvg_detector.ensure_symbol_storage(self.symbol)
+        self.fvg_detector.fvgs[self.symbol][self.timeframe] = merged_fvgs
+        self.fvg_detector.save_fvgs_to_cache()
+
+        self.logger.info(
+            f"Temporally merged {len(fvgs)} FVGs → {len(self.detected_fvgs)} "
+            f"(window: 1h 30m, same-type only). Cache updated."
+        )
 
     def generate_signals(self, start_date: datetime, end_date: datetime):
         bars = self.fetcher.fetch_bars_from_mt5(start_date, end_date, self.symbol, "M5")
@@ -316,7 +337,7 @@ class Tweny:
             if datetime.fromisoformat(fvg["filled_timestamp"]) > datetime.fromisoformat(fvg["detection_time"]) + timedelta(days=3):
                 continue
 
-            _bars = [bar for bar in bars if bar.timestamp >= datetime.fromisoformat(fvg["filled_timestamp"]) - timedelta(minutes=10)]
+            _bars = [bar for bar in bars if bar.timestamp >= datetime.fromisoformat(fvg["filled_timestamp"])]
 
             if not _bars:
                 continue
@@ -592,19 +613,19 @@ class Tweny:
             f"from {start_date} to {end_date}"
         )
         
-        self.fvg_detector.clear_cache()
+        # self.fvg_detector.clear_cache()
 
         try:
             self.logger.info("Detecting FVGs...")
             self.detect_fvgs_in_bars(start_date, end_date)
-            self._pre_process_fvgs()
+            # self._pre_process_fvgs()
 
             self.logger.info(f"Generating signals...")
             results = self.generate_signals(start_date, end_date)
             self.logger.info(f"Signals generated: {len(results[self.symbol])}")
             
             flags = {
-                "no_plots": False,
+                "no_plots": True,
                 "no_reports": False,
                 "no_mbox": False,
                 "show_15m_bars": False,

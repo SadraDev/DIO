@@ -269,7 +269,7 @@ class BreakoutEngine(BaseIndicator):
         breakout_line_source = None  # Track source for logging
         
         # Extract all FVGs from both timeframes
-        all_fvgs = fvgs.get("M15", []) + fvgs.get("H1", [])
+        all_fvgs = fvgs.get("M15", []) + fvgs.get("H1", []) + fvgs.get("H4", [])
         
         if is_bullish_side:
             # Bullish: Get bullish FVGs, London min, AND New York min as backup

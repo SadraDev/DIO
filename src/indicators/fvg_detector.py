@@ -229,7 +229,7 @@ class FVGDetector(BaseIndicator):
         fvg_type = fvg["type"]
         fvg_high = fvg["high"]
         fvg_low = fvg["low"]
-        detection_time = datetime.fromisoformat(fvg["detection_time"]) + timedelta(minutes=5)
+        detection_time = datetime.fromisoformat(fvg["detection_time"]) + timedelta(minutes=25)
         
         # Only check bars after detection
         bars_after = [bar for bar in bars if bar.timestamp >= detection_time]

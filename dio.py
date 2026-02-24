@@ -11,10 +11,15 @@ from src.strategies.tweny import Tweny
 
 if __name__ == "__main__":
     from datetime import datetime
-    # tweny = Tweny()
+    tweny = Tweny()
 
-    # tweny.symbol = "GBPUSD."
-    # results = tweny.run(datetime(2025, 11, 1), datetime(2025, 11,  30))
+    from src.core.data.fetcher import DataFetcher
+    fetcher = DataFetcher()
+
+    # print(fetcher.get_latest_bars("GBPUSD."))
+
+    tweny.symbol = "GBPUSD."
+    # results = tweny.run(datetime(2025, 1, 1), datetime(2026, 2,  21))
     # TODO: 1 DEC 2025; 27 NOV 2025 needs check
     two_hunters_cli()
 

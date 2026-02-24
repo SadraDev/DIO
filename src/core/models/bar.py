@@ -122,39 +122,39 @@ class Bar:
         if lowerwick_to_range <= 0.08 and self.is_bearish:
             return TrendDirection.DOWNTREND
 
-        # # Simple Body > 65% uncomment if needed TODO: move to config
-        # if body_to_range >= 0.65:
-        #     if self.is_bullish:
-        #             return TrendDirection.UPTREND
-        #     if self.is_bearish:
-        #             return TrendDirection.DOWNTREND
-
-        # Body > 90%
-        if body_to_range >= 0.9:
+        # Simple Body > 65% uncomment if needed TODO: move to config
+        if body_to_range >= 0.65:
             if self.is_bullish:
                     return TrendDirection.UPTREND
             if self.is_bearish:
                     return TrendDirection.DOWNTREND
 
-        # Body > 65%
-        if body_to_range >= 0.65:
+        # # Body > 90%
+        # if body_to_range >= 0.9:
+        #     if self.is_bullish:
+        #             return TrendDirection.UPTREND
+        #     if self.is_bearish:
+        #             return TrendDirection.DOWNTREND
 
-            wick_to_range = lowerwick_to_range + upperwick_to_range
+        # # Body > 65%
+        # if body_to_range >= 0.65:
+
+        #     wick_to_range = lowerwick_to_range + upperwick_to_range
             
-            if wick_to_range  < 0.2 and self.is_bullish: return TrendDirection.UPTREND
-            if wick_to_range  < 0.2 and self.is_bearish: return TrendDirection.DOWNTREND
-            if wick_to_range >= 0.2:
-                if self.is_bullish:
-                    if lowerwick_to_range / upperwick_to_range >= 1.5:
-                            return TrendDirection.UPTREND
-                else:
-                    return TrendDirection.NEUTRAL
+        #     if wick_to_range  < 0.2 and self.is_bullish: return TrendDirection.UPTREND
+        #     if wick_to_range  < 0.2 and self.is_bearish: return TrendDirection.DOWNTREND
+        #     if wick_to_range >= 0.2:
+        #         if self.is_bullish:
+        #             if lowerwick_to_range / upperwick_to_range >= 1.5:
+        #                     return TrendDirection.UPTREND
+        #         else:
+        #             return TrendDirection.NEUTRAL
                 
-                if self.is_bearish:
-                    if upperwick_to_range / lowerwick_to_range >= 1.5:
-                        return TrendDirection.DOWNTREND
-                else:
-                    return TrendDirection.NEUTRAL
+        #         if self.is_bearish:
+        #             if upperwick_to_range / lowerwick_to_range >= 1.5:
+        #                 return TrendDirection.DOWNTREND
+        #         else:
+        #             return TrendDirection.NEUTRAL
 
         # wick/wick on weak
         if self.is_weak:
