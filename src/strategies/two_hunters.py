@@ -586,11 +586,11 @@ class TwoHunters():
             results[symbol] = []
 
         click.echo(f"Detecting FVGs...")
-        self.fvg_detector.clear_cache()
+        # self.fvg_detector.clear_cache()
         self.fvg_detector.symbols = symbols
         self.fvg_detector.timeframes = ["H4"]
-        self.fvg_detector.detect(start_date, end_date)
-        # self.fvg_detector.load_fvgs_from_cache()
+        # self.fvg_detector.detect(start_date, end_date)
+        self.fvg_detector.load_fvgs_from_cache()
         click.echo(f"FVGs Detected.")
 
         try:
@@ -711,16 +711,14 @@ class TwoHunters():
         import json
         from datetime import datetime
         from pathlib import Path
-        
+
         fetcher = DataFetcher()
         signals_dir = Path('reports/signals')
         signals_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.logger.info(f"Starting live trading for {self.symbol}")
-        
         last_signal_date = None
         signal = None
-
         self.budget.calculate_pip_size(self.symbol)
         self.budget.calculate_lot_size(self.symbol)
         self.mbox_result = self.mbox_analyzer.calculate(
@@ -733,44 +731,35 @@ class TwoHunters():
         try:
             current_date = fetcher.get_latest_bars(self.symbol)[-1].timestamp.date()
             today_signals_found = False
-            
-            # Search for today's signal files
+
             for signal_file in signals_dir.glob(f"{self.symbol}_*.json"):
                 try:
-                    # Extract date from filename: SYMBOL_YYYYMMDD_HHMMSS.json
                     filename_parts = signal_file.stem.split('_')
                     if len(filename_parts) >= 2:
-                        file_date_str = filename_parts[1]  # YYYYMMDD
+                        file_date_str = filename_parts[1]
                         file_date = datetime.strptime(file_date_str, '%Y%m%d').date()
-                        
                         if file_date == current_date:
                             with open(signal_file, 'r') as f:
                                 signal_data = json.load(f)
-                            
-                            # Reconstruct Signal object using from_dict
                             loaded_signal = Signal.from_dict(cls=Signal, data=signal_data)
                             self.logger.warning(
                                 f"Loaded today's signal from {signal_file.name}: "
                                 f"{loaded_signal.action.value} @ {loaded_signal.entry_price}"
                             )
-                            
                             last_signal_date = current_date
-                            signal = loaded_signal  # Set the loaded signal as the current signal to skip generation
+                            signal = loaded_signal
                             today_signals_found = True
-                            
                 except Exception as e:
                     self.logger.warning(f"Error loading signal from {signal_file.name}: {e}")
                     continue
-            
+
             if today_signals_found:
                 self.logger.warning(
                     f"Today's signals loaded for {self.symbol}. "
                     f"Will skip signal generation until next day."
                 )
-        
         except Exception as e:
             self.logger.error(f"Error loading today's signals for {self.symbol}: {e}")
-            # Continue anyway - just skip the signal reload
 
         try:
             while not (stop_event and stop_event.is_set()):
@@ -779,9 +768,8 @@ class TwoHunters():
                     current_datetime = current_bar_list[-1].timestamp
                     current_date = current_datetime.date()
                 else:
-                    goodtimes.sleep(check_interval)
                     continue
-                
+
                 # Check daily signal limit
                 if last_signal_date == current_date:
                     self.logger.warning(
@@ -789,42 +777,50 @@ class TwoHunters():
                         f"skipping until next day, "
                         f"{signal}"
                     )
-                    check_interval = 1800  # Increase check interval to reduce load until next day
+                    check_interval = 1800
                     recent_orders = self.mt5.get_today_signals()
                     for sig in recent_orders:
                         if sig.ticket == signal.ticket:
-                            signal = sig  # Update signal with latest order info
+                            signal = sig
                             break
                     goodtimes.sleep(check_interval)
                     continue
-                
+
                 # Fetch and update bars
                 self._fetch_and_update_bars(
                     symbol=self.symbol,
                     fetcher=fetcher,
                     last_bar_time=self.all_bars[-1].timestamp if self.all_bars else None
                 )
-                
+
                 # Attempt signal
                 signal = self.attempt_signal(current_datetime)
-                
                 if signal is None:
                     goodtimes.sleep(check_interval)
                     continue
-                
-                # Place order
-                order_placed = self.mt5.place_order(signal)
-                
-                if not order_placed:
+
+                # ── Place order: retry for up to 5 minutes, then treat as daily limit ──
+                order_placed = False
+                place_order_deadline = goodtimes.time() + 5 * 60  # 5 minutes from now
+                while goodtimes.time() < place_order_deadline:
+                    if self.mt5.place_order(signal):
+                        order_placed = True
+                        self.logger.warning(f"Order placed successfully: {signal}")
+                        break
                     self.logger.warning(
-                        f"Failed to place order: {signal}"
+                        f"Failed to place order, retrying immediately: {signal}"
                     )
+
+                if not order_placed:
+                    self.logger.error(
+                        f"Could not place order for {self.symbol} after 5 minutes. "
+                        f"Treating as daily signal limit — skipping until next day."
+                    )
+                    last_signal_date = current_date  # enter daily-limit state
+                    check_interval = 1800
                     goodtimes.sleep(check_interval)
                     continue
-                else:
-                    self.logger.warning(
-                        f"Order placed successfully: {signal}"
-                    )
+                # ───────────────────────────────────────────────────────────────────────
 
                 # Save signal JSON using to_dict()
                 signal_data = signal.to_dict()
@@ -833,26 +829,21 @@ class TwoHunters():
                     f"{signal.timestamp.strftime('%Y%m%d_%H%M%S')}.json"
                 )
                 signal_filepath = signals_dir / signal_filename
-
                 try:
                     with open(signal_filepath, 'w') as f:
                         json.dump(signal_data, f, indent=2, default=str)
-                    
                     self.logger.info(f"Signal saved: {signal_filepath}")
                 except Exception as e:
                     self.logger.error(f"Failed to save signal JSON: {e}")
 
                 # Update daily limit
                 last_signal_date = current_date
-                
                 goodtimes.sleep(check_interval)
-        
+
         except KeyboardInterrupt:
             self.logger.info("Live trading interrupted")
-        
         except Exception as e:
             self.logger.error(f"Unexpected error in live trading: {e}", exc_info=True)
-        
         finally:
             self.logger.info(f"Live trading ended for {self.symbol}")
 
