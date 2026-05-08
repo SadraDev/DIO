@@ -5,6 +5,7 @@ from pathlib import Path
 from src.core.models.bar import Bar
 from src.core.data.fetcher import DataFetcher
 from src.indicators.base import BaseIndicator
+from config.settings import settings
 
 
 class FVGDetector(BaseIndicator):
@@ -42,7 +43,7 @@ class FVGDetector(BaseIndicator):
         self.fetcher = DataFetcher()
         self.min_gap_pips = min_gap_pips
         self.max_gap_pips = max_gap_pips
-        self.timeframes = timeframes or ["M15", "H1", "H4"]
+        self.timeframes = timeframes or ["M15", "H1", "H4", "H8"]
         
         # Get pip size from config (standard FX)
         self.pip_size = 0.0001
@@ -112,6 +113,115 @@ class FVGDetector(BaseIndicator):
         if symbol not in self.fvgs:
             self.fvgs[symbol] = {tf: [] for tf in self.timeframes}
 
+    def detect_session_extremas(self, bars, session):
+
+        london_config = settings.get("strategies.two_hunters.sessions.london", {})
+        newyork_config = settings.get("strategies.two_hunters.sessions.newyork", {})
+
+        if session == "london":
+            start = datetime.strptime(london_config.get("start"), "%H:%M").time()
+            end = datetime.strptime(london_config.get("end"), "%H:%M").time()
+        elif session == "newyork":
+            start = datetime.strptime(newyork_config.get("start"), "%H:%M").time()
+            end = datetime.strptime(newyork_config.get("end"), "%H:%M").time()
+        else:
+            return []
+
+        def in_session(ts_time):
+            """Handles normal and overnight sessions."""
+            if start <= end:
+                return start <= ts_time <= end
+            else:
+                # crosses midnight (e.g. 20:00 → 02:29)
+                return ts_time >= start or ts_time <= end
+
+        results = []
+
+        current_session_bars = []
+        current_session_start_ts = None
+
+        for i, bar in enumerate(bars):
+            bar_time = bar.timestamp.time()
+
+            if in_session(bar_time):
+                # entering or continuing a session
+                if not current_session_bars:
+                    current_session_start_ts = bar.timestamp
+
+                current_session_bars.append(bar)
+
+            else:
+                # session just ended → process it
+                if current_session_bars:
+                    highest_bar = max(current_session_bars, key=lambda b: b.high)
+                    lowest_bar  =  min(current_session_bars, key=lambda b: b.low)
+
+                    current_session_bars.remove(highest_bar)
+                    second_highest_bar = max(current_session_bars, key=lambda b: b.high)
+
+                    current_session_bars.remove(lowest_bar)
+                    second_lowest_bar = min(current_session_bars, key=lambda b: b.low)
+
+                    # MAX (bearish)
+                    results.append({
+                        'type': 'bearish',
+                        'high': highest_bar.high,
+                        'low': highest_bar.high,
+                        'size_pips': abs(highest_bar.high - second_highest_bar.high) / 0.0001, # Standard pip size
+                        'bar_open_time': current_session_start_ts.isoformat(),
+                        'detection_time': highest_bar.timestamp.isoformat(),
+                        'filled_timestamp': None,
+                    })
+
+                    # MIN (bullish)
+                    results.append({
+                        'type': 'bullish',
+                        'high': lowest_bar.low,
+                        'low': lowest_bar.low,
+                        'size_pips': abs(lowest_bar.low - second_lowest_bar.low) / 0.0001,
+                        'bar_open_time': current_session_start_ts.isoformat(),
+                        'detection_time': lowest_bar.timestamp.isoformat(),
+                        'filled_timestamp': None,
+                    })
+
+                    # reset for next session
+                    current_session_bars = []
+                    current_session_start_ts = None
+
+        # handle trailing session (if data ends mid-session)
+        if current_session_bars:
+            highest_bar = max(current_session_bars, key=lambda b: b.high)
+            lowest_bar  =  min(current_session_bars, key=lambda b: b.low)
+
+            current_session_bars.remove(highest_bar)
+            second_highest_bar = max(current_session_bars, key=lambda b: b.high)
+
+            current_session_bars.remove(lowest_bar)
+            second_lowest_bar = min(current_session_bars, key=lambda b: b.low)
+
+            results.append({
+                'type': 'bearish',
+                'high': highest_bar.high,
+                'low': highest_bar.high,
+                'size_pips': abs(highest_bar.high - second_highest_bar.high) / 0.0001, # Standard pip size
+                'bar_open_time': current_session_start_ts.isoformat(),
+                'detection_time': highest_bar.timestamp.isoformat(),
+                'filled_timestamp': None,
+            })
+
+            results.append({
+                'type': 'bullish',
+                'high': lowest_bar.low,
+                'low': lowest_bar.low,
+                'size_pips': abs(lowest_bar.low - second_lowest_bar.low) / 0.0001,
+                'bar_open_time': current_session_start_ts.isoformat(),
+                'detection_time': lowest_bar.timestamp.isoformat(),
+                'filled_timestamp': None,
+            })
+
+        return results
+
+
     def detect_fvgs_in_bars(self, bars: List[Bar]) -> List[Dict[str, Any]]:
         """
         Detect FVGs in a given list of bars.
@@ -119,12 +229,12 @@ class FVGDetector(BaseIndicator):
         Returns:
             list of FVG dicts with structure:
             {
-                'type': 'bullish' or 'bearish',
-                'high': float,
-                'low': float,
-                'size_pips': float,
-                'bar_open_time': str (ISO format),
-                'detection_time': str (ISO format),
+                'type': 'bearish',
+                'high': maximum + 0.000001,
+                'low': maximum - 0.000001,
+                'size_pips': "session_name",
+                'bar_open_time': first bar of the session .timestamp (ISO format),
+                'detection_time': first bar of the session .timestamp (ISO format),
                 'filled_timestamp': None or str (ISO format when filled),
             }
         """
@@ -187,7 +297,7 @@ class FVGDetector(BaseIndicator):
                             oldest_fvg_time,
                             datetime.now(),
                             symbol,
-                            "M5",
+                            "M1",
                         )
                     else:
                         check_bars = []
@@ -229,19 +339,19 @@ class FVGDetector(BaseIndicator):
         fvg_type = fvg["type"]
         fvg_high = fvg["high"]
         fvg_low = fvg["low"]
-        detection_time = datetime.fromisoformat(fvg["detection_time"]) + timedelta(minutes=25)
+        detection_time = datetime.fromisoformat(fvg["detection_time"])
         
         # Only check bars after detection
-        bars_after = [bar for bar in bars if bar.timestamp >= detection_time]
+        bars_after = [bar for bar in bars if bar.timestamp > detection_time]
 
         for bar in bars_after:
             if fvg_type == "bullish":
                 # Bullish FVG filled when low penetrates into gap
-                if bar.low <= fvg_high:
+                if bar.low < fvg_high:
                     return True, bar.timestamp.isoformat()
             elif fvg_type == "bearish":
                 # Bearish FVG filled when high penetrates into gap
-                if bar.high >= fvg_low:
+                if bar.high > fvg_low:
                     return True, bar.timestamp.isoformat()
         
         return False, None
@@ -444,7 +554,7 @@ class FVGDetector(BaseIndicator):
         symbol_list = symbols or self.symbols
         
         results: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
-        
+
         for symbol in symbol_list:
             symbol_results: Dict[str, List[Dict[str, Any]]] = {}
             
@@ -461,7 +571,6 @@ class FVGDetector(BaseIndicator):
                         fvgs = self.detect_fvgs_in_bars(bars)
                         symbol_results[tf] = fvgs
                         self.ensure_symbol_storage(symbol)
-                        # Use merge instead of extend
                         self.fvgs[symbol][tf] = self._merge_fvg_list(
                             self.fvgs[symbol][tf],
                             fvgs
@@ -472,6 +581,40 @@ class FVGDetector(BaseIndicator):
                 except Exception:
                     symbol_results[tf] = []
             
+            try:
+                bars = self.fetcher.fetch_bars_from_mt5(
+                    start_dt,
+                    end_dt,
+                    symbol,
+                    "M1",
+                )
+
+                for session in ["london", "newyork"]:
+                    if not bars:
+                        symbol_results[session] = []
+                        continue
+
+                    try:
+                        fvgs = self.detect_session_extremas(bars, session)
+                        symbol_results[session] = fvgs
+
+                        self.ensure_symbol_storage(symbol)
+                        self.fvgs[symbol].setdefault(session, [])
+
+                        self.fvgs[symbol][session] = self._merge_fvg_list(
+                            self.fvgs[symbol][session],
+                            fvgs
+                        )
+
+                    except Exception as e:
+                        print(f"{session} error:", e)
+                        symbol_results[session] = []
+
+            except Exception as e:
+                print("M1 fetch error:", e)
+                for session in ["london", "newyork"]:
+                    symbol_results[session] = []     
+        
             results[symbol] = symbol_results
         
         # Clean up filled/violated FVGs
@@ -479,7 +622,7 @@ class FVGDetector(BaseIndicator):
         
         # Save to cache
         self.save_fvgs_to_cache()
-        
+
         return results
 
     def get_nearby_active_fvgs(
@@ -487,7 +630,7 @@ class FVGDetector(BaseIndicator):
         bar: Bar,
         symbol: str,
         pip_size: float,
-        timeframes: List[str] = ["H1", "M15"],
+        timeframes: List[str] = ["M15", "H1", "H4", "H8", "london", "newyork"],
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get all active FVGs for a given symbol where the distance from the bar
@@ -524,6 +667,9 @@ class FVGDetector(BaseIndicator):
                 continue
             
             for fvg in self.fvgs[symbol][tf]:
+                if datetime.fromisoformat(fvg.get("detection_time")) > bar.timestamp:
+                    continue
+
                 # Check if FVG is active at bar's timestamp
                 filled_ts = fvg.get("filled_timestamp")
                 
@@ -537,7 +683,7 @@ class FVGDetector(BaseIndicator):
                         filled_dt = filled_ts
                     
                     # FVG is active if bar is before fill time
-                    is_active = bar.timestamp < filled_dt
+                    is_active = bar.timestamp <= filled_dt
                 
                 if not is_active:
                     continue
@@ -545,15 +691,15 @@ class FVGDetector(BaseIndicator):
                 # Compute distance based on FVG type
                 if fvg["type"] == "bullish":
                     # Distance from bar.low to fvg's high boundary
-                    distance = abs(bar.low - fvg["high"]) / pip_size
+                    distance = (bar.low - fvg["high"]) / self.pip_size # Standard pip size
                 elif fvg["type"] == "bearish":
                     # Distance from bar.high to fvg's low boundary
-                    distance = abs(bar.high - fvg["low"]) / pip_size
+                    distance = (fvg["low"] - bar.high) / self.pip_size # Standard pip size
                 else:
                     continue
                 
                 # Include if distance is within pip_size
-                if distance <= pip_size:
+                if distance >= 0 and distance <= pip_size:
                     results[tf].append(fvg)
         
         return results

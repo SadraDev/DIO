@@ -45,6 +45,8 @@ class Bar:
         self.range = self.high - self.low
         self.upper_wick = self.high - max(self.open, self.close)
         self.lower_wick = min(self.open, self.close) - self.low
+        self.top = max(self.open, self.close)
+        self.bottom = min(self.open, self.close)
         
         # Directional properties
         self.is_bullish = self.close > self.open
@@ -114,20 +116,20 @@ class Bar:
         if lowerwick_to_range > 0.55:
             return TrendDirection.UPTREND
 
-        # no upperwick yes uptrend
-        if upperwick_to_range <= 0.08 and self.is_bullish:
-            return TrendDirection.UPTREND
+        # # no upperwick yes uptrend
+        # if upperwick_to_range <= 0.08 and self.is_bullish:
+        #     return TrendDirection.UPTREND
 
-        # no lowerwick yes downtrend
-        if lowerwick_to_range <= 0.08 and self.is_bearish:
-            return TrendDirection.DOWNTREND
+        # # no lowerwick yes downtrend
+        # if lowerwick_to_range <= 0.08 and self.is_bearish:
+        #     return TrendDirection.DOWNTREND
 
-        # Simple Body > 65% uncomment if needed TODO: move to config
-        if body_to_range >= 0.65:
-            if self.is_bullish:
-                    return TrendDirection.UPTREND
-            if self.is_bearish:
-                    return TrendDirection.DOWNTREND
+        # # Simple Body > 65% uncomment if needed TODO: move to config
+        # if body_to_range >= 0.65:
+        #     if self.is_bullish:
+        #             return TrendDirection.UPTREND
+        #     if self.is_bearish:
+        #             return TrendDirection.DOWNTREND
 
         # # Body > 90%
         # if body_to_range >= 0.9:
@@ -201,7 +203,15 @@ class Bar:
         if self.open == 0:
             return 0.0
         return ((self.close - self.open) / self.open) * 100
-    
+
+    @property
+    def is_uptrend(self):
+        return self.trendy == TrendDirection.UPTREND
+
+    @property
+    def is_downtrend(self):
+        return self.trendy == TrendDirection.DOWNTREND
+
     def __repr__(self):
         """String representation of the bar"""
         direction = "↑" if self.is_bullish else "↓" if self.is_bearish else "─"

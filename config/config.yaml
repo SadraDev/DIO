@@ -4,6 +4,7 @@ system:
 
 paths:
   logs: reports/logs
+  csvs: reports/CSVs
 
 account:
   balance: 10000
@@ -48,13 +49,13 @@ data:
 
 strategies:
   two_hunters:
-    margin_pips: 0.02
+    margin_pips: 0.1  # in pips
     fvg:
-      min_size_pips: 3.5
-      max_size_pips: 5.0
+      min_size_pips: 5.0
+      max_size_pips: 10.0
     ratios:
       stop_loss: 1.0
-      take_profit: 3.0
+      take_profit: 2.0
     breakout:
       num_hunt_main: 2
       num_hunt_recovery: 1
@@ -84,15 +85,15 @@ strategies:
       use_2r_for_eur: false
       use_online_commission_manager: false
       use_offline_commission_manager: false
-      use_large_slp_flag: true
+      use_large_slp_flag: false
       use_trading_hours: false
       use_all_flags: false
       use_trend_flag: false
-      use_time_flag: true
+      use_time_flag: false
       use_choch_flag: false
       time_flag_hour: '10:30'
       large_slp_magic_number: 9
-      order_block_significance: 0.00
+      order_block_significance: 0.02
     backtesting:
       default_start: '2001-09-11'
       default_end: '2001-09-12'
@@ -110,8 +111,8 @@ strategies:
   Tweny:
     ratio:
       sl: 1
-      tp: 2
-    sl_margin_pct: 0.3
+      tp: 4
+    sl_margin_pct: 0.001
     pips_to_widen_fgvs: 1.5
     pips_to_merge_fgvs: 1.6
     force_stop_time: "17:30"

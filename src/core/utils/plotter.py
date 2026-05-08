@@ -169,7 +169,7 @@ class TradingPlotter:
             
             _day_range = (df['low'].min(), df['high'].max())
             _time_range_for_fvgs = (bars[0].timestamp, bars[-1].timestamp)
-            self.add_fvg_rectangles(fig, symbol, ['H1', 'M15'], _time_range_for_fvgs, _day_range)
+            self.add_fvg_rectangles(fig, symbol, None, _time_range_for_fvgs, _day_range)
 
             # Update layout
             chart_title = title or f"{symbol} Trading Analysis - {bars[0].timestamp.date()} to {bars[-1].timestamp.date()}"
@@ -634,10 +634,11 @@ class TradingPlotter:
                     ))
 
     def add_fvg_rectangles(self, fig, symbol: str, timeframes: List[str] = None, 
-                           date_range: tuple[datetime, datetime] = None, day_range: tuple[int, int] = None) -> None:        
-        
+                           date_range: tuple[datetime, datetime] = None, 
+                           day_range: tuple[int, int] = (None, None)) -> None:        
+
         if timeframes is None:
-            timeframes = ['H1', 'M15']
+            timeframes = ['M15', 'H1', 'H4', 'H8', 'london', 'newyork']
         
         try:
             # Get FVG cache directory
@@ -675,32 +676,36 @@ class TradingPlotter:
                 # Filter by date_range if provided
                 todays_fvgs = []
                 if date_range is not None:
+                # if True:
                     start_date, end_date = date_range
                     day_low, day_high = day_range
                     
                     for fvg in sorted_fvg_list:
-                        if fvg['low'] > day_high+((day_high-day_low)/2): continue
-                        if fvg['high'] < day_low-((day_high-day_low)/2): continue
+                        # if fvg['low'] > day_high+((day_high-day_low)/2): continue
+                        # if fvg['high'] < day_low-((day_high-day_low)/2): continue
 
                         if end_date <= datetime.fromisoformat(fvg['bar_open_time']):
                             continue
                         
                         if fvg['filled_timestamp'] is None:
+                            # if datetime.fromisoformat(fvg['detection_time']) < start_date:
+                            #     fvg['detection_time'] = (start_date - timedelta(minutes=30)).isoformat()
+                            # fvg['filled_timestamp'] = (end_date + timedelta(minutes=30)).isoformat()
                             todays_fvgs.append(fvg)
                             continue
                         
                         if start_date >= datetime.fromisoformat(fvg['filled_timestamp']):
                             continue
 
-                        if datetime.fromisoformat(fvg['detection_time']) < start_date:
-                            fvg['detection_time'] = (start_date - timedelta(minutes=30)).isoformat()
+                        # if datetime.fromisoformat(fvg['detection_time']) < start_date:
+                        #     fvg['detection_time'] = (start_date - timedelta(minutes=30)).isoformat()
 
-                        if datetime.fromisoformat(fvg['filled_timestamp']) > end_date:
-                            fvg['filled_timestamp'] = (end_date + timedelta(minutes=30)).isoformat()
+                        # if datetime.fromisoformat(fvg['filled_timestamp']) > end_date:
+                        #     fvg['filled_timestamp'] = (end_date + timedelta(minutes=30)).isoformat()
 
                         todays_fvgs.append(fvg)
 
-                if not sorted_fvg_list:
+                if not todays_fvgs:
                     # self.logger.info(f"No FVGs found for {symbol}/{tf} within date range")
                     continue
                 
@@ -801,21 +806,21 @@ class TradingPlotter:
                 name=rect_name
             )
             
-            # Optional: Add text label at midpoint of rectangle
-            if size_pips > 5:  # Only label large FVGs to avoid clutter
-                mid_time = detection_time + (end_time - detection_time) / 2
-                mid_price = (high + low) / 2
-                label_text = f"{size_pips:.1f}p"
-                
-                fig.add_annotation(
-                    x=mid_time,
-                    y=mid_price,
-                    text=label_text,
-                    showarrow=False,
-                    font=dict(size=9, color='rgba(0, 0, 0, 0.5)'),
-                    bgcolor='rgba(255, 255, 255, 0.7)',
-                    borderpad=2
-                )
+            # Add text label at midpoint of rectangle
+
+            mid_time = end_time - (end_time - detection_time) / 10
+            mid_price = (high + low) / 2
+            label_text = f"{timeframe} - {size_pips:.1f}p"
+            
+            fig.add_annotation(
+                x=mid_time,
+                y=mid_price,
+                text=label_text,
+                showarrow=False,
+                font=dict(size=9, color='rgba(0, 0, 0, 0.5)'),
+                bgcolor='rgba(255, 255, 255, 0.7)',
+                borderpad=2
+            )
         
         except Exception as e:
             self.logger.error(f"Error drawing FVG rectangle for {fvg}: {e}")
@@ -953,7 +958,7 @@ class TradingPlotter:
             return {}
 
         # Configurable initial balance; fall back to a sane default if missing/invalid
-        initial_balance = settings.get("account.initial_balance")
+        initial_balance = settings.get("account.balance")
         try:
             initial_balance = float(initial_balance) if initial_balance is not None else 10000.0
         except Exception:
@@ -1490,10 +1495,6 @@ class TradingPlotter:
         fetcher = DataFetcher()
         start_date, end_date = date_range
 
-        if display_range not in ["daily", "monthly"]:
-            self.logger.error("Invaild display range given. Use 'monthly' or 'daily'.")
-            return defaultdict(dict)
-
         # Get all symbols from results (excluding 'all')
         symbols = [sym for sym in results.keys() if sym != "all"]
         
@@ -1508,14 +1509,21 @@ class TradingPlotter:
                         display_date = signal.timestamp.date()
                     elif display_range == 'monthly':
                         display_date = signal.timestamp.date().replace(day=1)
+                    else:
+                        display_date = display_range
                     symbol_date_signals[symbol][display_date].append(signal)
-        
+                    
         # Generate list of dates to process
         current_date = start_date.date()
         dates_to_process = []
         
         # Storage for chart paths - RELATIVE paths for portability
         chartpaths = defaultdict(dict)
+
+        if display_range not in ["daily", "monthly"]:
+            self.logger.warning("Invaild display range given. Use 'monthly' or 'daily'. Generating charts without a specific range.")
+            start_date, end_date = date_range[0], date_range[1]            
+            dates_to_process.append((current_date, start_date, end_date))
 
         if display_range == "daily":
             while current_date <= end_date.date():
@@ -1798,7 +1806,7 @@ class TradingPlotter:
         
         # Import Budget for balance calculation
         from src.core.models.budget import Budget
-        budget = Budget()
+        budget = Budget(initial_balance=settings.get("account.balance"))
         
         tablerows = ""
         for i, signal in enumerate(sorted_signals, 1):

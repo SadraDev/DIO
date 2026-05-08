@@ -82,8 +82,8 @@ class TwoHunters():
         self.max_signals_per_symbol = settings.max_signals_per_symbol
         self.margin_pips = self.config.get("margin_pips")
         self.fvg_range = (
-            self.config.get("fvg", {}).get("min_size_pips", 1.0),
-            self.config.get("fvg", {}).get("max_size_pips", 5.0)
+            self.config.get("fvg", {}).get("min_size_pips"),
+            self.config.get("fvg", {}).get("max_size_pips")
         )
         self.ratios = self.config.get("ratios", {"stop_loss": 1.0, "take_profit": 3.0})
         
@@ -153,7 +153,7 @@ class TwoHunters():
         """Get main session bars for the target date"""
         session_start = datetime.combine(target_date.date(), self.session_time[0])
         session_end = datetime.combine(target_date.date(), self.session_time[1])
-        
+
         session_bars = [
             bar for bar in self.all_bars
             if session_start <= bar.timestamp <= session_end
@@ -205,40 +205,69 @@ class TwoHunters():
         # Fair Value Gap (FVG) logic
         min_fvg, max_fvg = self.fvg_range
         
+        # def dynamic_fvg_scale(fvg_size_pips: float) -> float:
+        #     """Calculate dynamic scale based on FVG size"""
+        #     if fvg_size_pips < min_fvg:
+        #         return 1.0
+        #     elif fvg_size_pips >= max_fvg:
+        #         return 0.5
+        #     return 1.0 - (fvg_size_pips * 0.5) / max_fvg
+
         def dynamic_fvg_scale(fvg_size_pips: float) -> float:
-            """Calculate dynamic scale based on FVG size"""
+            """Calculate dynamic scale based on FVG size.
+            
+            Maps fvg_size_pips from [min_fvg, max_fvg] to [0.5, 0.3].
+            Returns 0.5 when closer to min_fvg, 0.3 when closer to max_fvg.
+            """
+            if min_fvg <= fvg_size_pips <= max_fvg:
+                # Linear interpolation from (min_fvg -> 0.5) to (max_fvg -> 0.3)
+                t = (fvg_size_pips - min_fvg) / (max_fvg - min_fvg)  # t ranges 0 to 1
+                return 0.5 - (t * 0.1)  # 0.5 - t*0.1 gives 0.5 to 0.4
+            
+            # Handle edge cases
             if fvg_size_pips < min_fvg:
-                return 1.0
-            elif fvg_size_pips >= max_fvg:
-                return 0.5
-            return 1.0 - (fvg_size_pips * 0.5) / max_fvg
-        
+                return 1.0  # Below min, return max scale
+            if fvg_size_pips > max_fvg:
+                return 0.4  # Above max, return min scale
+
+        scale = 1.0
         if action == SignalAction.SELL:
             # Check for bullish FVG
             if before_bar.low > signal_bar.close:
-                fvg_size_pips = self.budget.pips_from_diff(before_bar.low - signal_bar.close)
+                # fvg_size_pips = self.budget.pips_from_diff(signal_bar.high - signal_bar.low)
+                fvg_size_pips = self.budget.pips_from_diff(extrema - signal_bar.low)
                 scale = dynamic_fvg_scale(fvg_size_pips)
-                entry_price = before_bar.low - (before_bar.low - signal_bar.close) * scale
+                
+                if scale == 1.0: entry_price = signal_bar.close
+                # else: entry_price = signal_bar.high - abs(signal_bar.low - signal_bar.high) * scale
+                else: entry_price = extrema - abs(signal_bar.low - extrema) * scale
                 
                 self.logger.debug(f"SELL FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f}")
             
             diff = self.budget.diff_from_pips(self.margin_pips)
             stop_loss = self.ratios["stop_loss"] * (extrema + diff)
-            take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss)
+            
+            if scale == 1.0: take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss)
+            else: take_profit = signal_bar.close - self.ratios["take_profit"] * abs(signal_bar.close - stop_loss)
 
         elif action == SignalAction.BUY:
             # Check for bullish FVG
             if signal_bar.close > before_bar.high:
-                fvg_size_pips = self.budget.pips_from_diff(signal_bar.close - before_bar.high)
+                fvg_size_pips = self.budget.pips_from_diff(signal_bar.high - extrema)
                 scale = dynamic_fvg_scale(fvg_size_pips)
-                entry_price = before_bar.high + (signal_bar.close - before_bar.high) * scale
+                
+                if scale == 1.0: entry_price = signal_bar.close
+                # else: entry_price = signal_bar.low + abs(signal_bar.low - signal_bar.high) * scale
+                else: entry_price = extrema + abs(extrema - signal_bar.high) * scale
                 
                 self.logger.debug(f"BUY FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f}")
             
             diff = self.budget.diff_from_pips(self.margin_pips)
             stop_loss = self.ratios["stop_loss"] * (extrema - diff)
-            take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss)
-        
+
+            if scale == 1.0: take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss)
+            else: take_profit = signal_bar.close + self.ratios["take_profit"] * abs(signal_bar.close - stop_loss)
+
         self.logger.debug(f"Entry calculation: EP={entry_price:.5f}, SL={stop_loss:.5f}, TP={take_profit:.5f}")
         return entry_price, stop_loss, take_profit
     
@@ -324,21 +353,22 @@ class TwoHunters():
         
         elif True:
             self.breakout_engine.type = BreakoutType.CUSTOM
-
+            
             # Get current day
             current_day = session_bars[0].timestamp
 
-            london_results, newyork_results = self.get_london_newyork_results(current_day, failed_signal.symbol)
+            # london_results, newyork_results = self.get_london_newyork_results(current_day=current_day, symbol=failed_signal.symbol, look_back_days=7)
+            # london_results, newyork_results = None, None
 
             outcome_bar = next((bar for bar in session_bars if bar.timestamp == failed_signal.outcome_timestamp), None)
-            bars_after_failed = [bar for bar in session_bars if bar.timestamp > failed_signal.outcome_timestamp]
+            bars_after_failed = [bar for bar in session_bars if bar.timestamp >= failed_signal.outcome_timestamp]
 
-            fvg_results = self.fvg_detector.get_nearby_active_fvgs(bar=outcome_bar, symbol=failed_signal.symbol, pip_size=30.0)
+            # fvg_results = self.fvg_detector.get_nearby_active_fvgs(bar=outcome_bar, symbol=failed_signal.symbol, pip_size=50.0)
 
             extrema, signal_bar, action, hunter_bar, custom_sl_tp = self.breakout_engine.breakout(
                 session_bars=bars_after_failed, mbox_result=mbox_result, 
-                london_results=london_results, newyork_results=newyork_results, 
-                fvg_results=fvg_results
+                london_results={}, newyork_results={}, 
+                fvg_results=outcome_bar, failed_signal=failed_signal
             )
         
         else:
@@ -432,18 +462,23 @@ class TwoHunters():
                     signal.take_profit = _2r_top
                     signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
 
-        if self.breakout_engine.type == BreakoutType.CUSTOM:
-            if custom_sl_tp["stop_loss"]:
-                signal.initial_stop_loss = custom_sl_tp["stop_loss"]
-                signal.stop_loss = custom_sl_tp["stop_loss"]
+        # if self.breakout_engine.type == BreakoutType.CUSTOM:
+        #     if custom_sl_tp["stop_loss"]:
+        #         signal.initial_stop_loss = custom_sl_tp["stop_loss"]
+        #         signal.stop_loss = custom_sl_tp["stop_loss"]
             
-            if custom_sl_tp["take_profit"]:
-                signal.initial_take_profit = custom_sl_tp["take_profit"]
-                signal.take_profit = custom_sl_tp["take_profit"]
+        #     if custom_sl_tp["take_profit"]:
+        #         signal.initial_take_profit = custom_sl_tp["take_profit"]
+        #         signal.take_profit = custom_sl_tp["take_profit"]
 
-            signal.entry_lot = self.budget.lots_from_diff(signal.symbol, abs(signal.entry_price - signal.stop_loss))
+
+            _r = abs(signal.entry_price - signal.stop_loss)
+            # if signal.is_sell: signal.initial_take_profit, signal.take_profit = signal.entry_price - 6*_r, signal.entry_price - 6*_r
+            # if signal.is_buy: signal.initial_take_profit, signal.take_profit = signal.entry_price + 6*_r, signal.entry_price + 6*_r
+            
+            signal.entry_lot = self.budget.lots_from_diff(signal.symbol, _r)
             signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
-            signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.stop_loss - signal.entry_price))
+            signal.stop_loss_pips = self.budget.pips_from_diff(_r)
 
 
         # Log signal generation
@@ -456,13 +491,14 @@ class TwoHunters():
         
         # Update counter
         self.signal_counter[self.symbol] += 1
-        
+
         return signal
 
     def get_london_newyork_results(
         self,
         current_day: datetime,
-        symbol: str
+        symbol: str,
+        look_back_days: int = 1
     ) -> tuple[dict | None, dict | None]:
         """
         Extract London and New York session highs/lows from the previous trading day.
@@ -486,78 +522,49 @@ class TwoHunters():
         newyork_start = datetime.strptime(newyork_config.get("start"), "%H:%M").time()
         newyork_end = datetime.strptime(newyork_config.get("end"), "%H:%M").time()
         
-        # Calculate previous trading day (handle weekends)
-        if current_day.weekday() == 0:  # Monday -> Friday
-            previous_day = current_day - timedelta(days=3)
-        elif current_day.weekday() == 6:  # Sunday -> Friday
-            previous_day = current_day - timedelta(days=2)
-        else:  # Other days -> previous day
-            previous_day = current_day - timedelta(days=1)
+        london_results:  List[dict] = []
+        newyork_results: List[dict] = []
         
-        # Fetch bars for previous trading day
-        prev_day_start = datetime.combine(previous_day.date(), time(13, 0))
-        prev_day_end = datetime.combine(current_day.date(), time(3, 30))
-        
-        try:
-            previous_bars = fetcher.fetch_bars_from_mt5(
-                prev_day_start,
-                prev_day_end,
-                symbol
-            )
-                
-            if not previous_bars:
-                self.logger.warning(f"No bars fetched for previous trading day {previous_day.date()}")
-                return {"max_val": None, "min_val": None}, {"max_val": None, "min_val": None}
+        for _ in range(look_back_days):
+            if current_day.weekday() == 0:  # Monday -> Friday
+                previous_day = current_day - timedelta(days=3)
+            elif current_day.weekday() == 6:  # Sunday -> Friday
+                previous_day = current_day - timedelta(days=2)
+            else:  # Other days -> previous day
+                previous_day = current_day - timedelta(days=1)
+
+            london_bars = fetcher.fetch_bars_from_mt5(
+                start_dt = datetime.combine(previous_day.date(), london_start),
+                end_dt   = datetime.combine(previous_day.date(), london_end),
+                symbol   = symbol
+                )
+
+            newyork_bars = fetcher.fetch_bars_from_mt5(
+                start_dt = datetime.combine(previous_day.date(), newyork_start),
+                end_dt   = datetime.combine((previous_day+timedelta(days=1)).date(), newyork_end),
+                symbol   = symbol
+                )
             
-            # Extract London session bars (use previous_day consistently)
-            london_start_dt = datetime.combine(previous_day.date(), london_start)
-            london_end_dt = datetime.combine(previous_day.date(), london_end)
-            
-            london_bars = [
-                bar for bar in previous_bars
-                if london_start_dt <= bar.timestamp <= london_end_dt
-            ]
-            
-            # Extract New York session bars (NY may span to next day)
-            newyork_start_dt = datetime.combine(previous_day.date(), newyork_start)
-            newyork_end_dt = datetime.combine((previous_day + timedelta(days=1)).date(), newyork_end)
-            
-            newyork_bars = [
-                bar for bar in previous_bars
-                if newyork_start_dt <= bar.timestamp <= newyork_end_dt
-            ]
-            
-            # Calculate high and low for each session
-            london_high = max(bar.high for bar in london_bars) if london_bars else None
-            london_low = min(bar.low for bar in london_bars) if london_bars else None
-            newyork_high = max(bar.high for bar in newyork_bars) if newyork_bars else None
-            newyork_low = min(bar.low for bar in newyork_bars) if newyork_bars else None
-            
-            if london_high is None or newyork_high is None:
-                self.logger.warning(f"Missing session data for previous trading day {previous_day.date()}")
-                return {"max_val": None, "min_val": None}, {"max_val": None, "min_val": None}
-            
-            london_results = {
-                "max_val": london_high,
-                "min_val": london_low
-            }
-            
-            newyork_results = {
-                "max_val": newyork_high,
-                "min_val": newyork_low
-            }
-            
-            self.logger.info(
-                f"Previous trading day {previous_day.date()} sessions - "
-                f"London: [{london_low:.5f}, {london_high:.5f}], "
-                f"NewYork: [{newyork_low:.5f}, {newyork_high:.5f}]"
-            )
-            
-            return london_results, newyork_results
-            
-        except Exception as e:
-            self.logger.error(f"Error fetching previous trading day session extrema: {e}")
-            return {"max_val": None, "min_val": None}, {"max_val": None, "min_val": None}
+            if london_bars and newyork_bars:
+
+                london_results.append({
+                    "timestamp": previous_day.isoformat(),
+                    "max_val": max(bar.high for bar in london_bars),
+                    "min_val": min(bar.low for bar in london_bars)
+                })
+
+                newyork_results.append({
+                    "timestamp": previous_day.isoformat(),
+                    "max_val": max(bar.high for bar in newyork_bars),
+                    "min_val": min(bar.low for bar in newyork_bars)
+                })
+
+            else:
+                look_back_days+=1
+
+            current_day = previous_day
+
+        return london_results, newyork_results
 
     def backtest(
         self,
@@ -587,9 +594,9 @@ class TwoHunters():
 
         click.echo(f"Detecting FVGs...")
         # self.fvg_detector.clear_cache()
-        self.fvg_detector.symbols = symbols
-        self.fvg_detector.timeframes = ["H4"]
-        # self.fvg_detector.detect(start_date, end_date)
+        # self.fvg_detector.symbols = symbols
+        # self.fvg_detector.timeframes = ["H8", "M15"]
+        # self.fvg_detector.detect(start_date - timedelta(days=20), end_date)  # TODO: move to config
         self.fvg_detector.load_fvgs_from_cache()
         click.echo(f"FVGs Detected.")
 
@@ -608,7 +615,7 @@ class TwoHunters():
                     continue
                 
                 current_date_start = datetime.combine(current_date.date(), self.mbox_time[0])
-                current_date_end = datetime.combine(current_date.date(), time(23, 59))
+                current_date_end = datetime.combine(current_date.date(), self.session_time[1])
 
                 for symbol in symbols:
                     daily_bars = fetcher.fetch_bars_from_mt5(current_date_start, current_date_end, symbol)
@@ -616,7 +623,7 @@ class TwoHunters():
 
                     self.budget.calculate_pip_size(symbol)
                     self.budget.calculate_lot_size(symbol)
-                
+
                     if daily_bars:
                         self.symbol = symbol
                         self.add_bars(daily_bars)
@@ -628,24 +635,23 @@ class TwoHunters():
                                 results[symbol].append(main_signal)
                                 signals.append(main_signal)
                                 if self.check_strategy_flags(main_signal):
+                                    # if not main_signal.time_flag:
                                     self.budget.apply_signal_gain(main_signal)
 
                                     self.logger.debug(f"Main signal completed: {main_signal.outcome.value}, "
                                                     f"Gain: {main_signal.gain}")
-                                
-                                if main_signal.outcome.value == 'loss':
                                     
+                                if main_signal.outcome.value == 'loss':
                                     recovery_signal = self.attempt_signal(current_date, failed_signal=main_signal)
                                     
                                     if recovery_signal:
                                         recovery_signal.evaluate_signal(budget=self.budget)
-                                        
                                         if recovery_signal.is_completed:
                                             results[symbol].append(recovery_signal)
                                             signals.append(recovery_signal)
                                             if self.check_strategy_flags(recovery_signal):
                                                 self.budget.apply_signal_gain(recovery_signal)
-                                            
+
                                                 self.logger.debug(f"Recovery signal completed: "
                                                                 f"{recovery_signal.outcome.value}, "
                                                                 f"Gain: {recovery_signal.gain}")
@@ -653,7 +659,7 @@ class TwoHunters():
                 days_processed += 1
                 current_date += timedelta(days=1)
                 commission_loss = sum([s.commission for s in signals if not s.used_flag])
-                click.echo(f"Date: {current_date.date()} --> Running Balance: {round(self.budget.current_balance)}$ ~+ {round(commission_loss)}$ <--")
+                click.echo(f"Date: {current_date.date()} --> Running Balance: {round(self.budget.current_balance)}$ - Commission paid: {round(commission_loss)}$ <--")
             
             # Evaluate prop status
             self.budget.evaluate_prop_status(signals)
@@ -702,235 +708,3 @@ class TwoHunters():
         except Exception as e:
             log_system_event("backtest_error", error=str(e))
             raise
-
-    def live(self, check_interval=1, stop_event=None):
-        """
-        Live trading execution for a single symbol.
-        """
-        from src.core.data.fetcher import DataFetcher
-        import json
-        from datetime import datetime
-        from pathlib import Path
-
-        fetcher = DataFetcher()
-        signals_dir = Path('reports/signals')
-        signals_dir.mkdir(parents=True, exist_ok=True)
-
-        self.logger.info(f"Starting live trading for {self.symbol}")
-        last_signal_date = None
-        signal = None
-        self.budget.calculate_pip_size(self.symbol)
-        self.budget.calculate_lot_size(self.symbol)
-        self.mbox_result = self.mbox_analyzer.calculate(
-            self.get_mbox_bars(
-                fetcher.get_latest_bars(self.symbol)[-1].timestamp
-            )
-        )
-
-        # Load today's signals from JSON to prevent restart-induced duplicates
-        try:
-            current_date = fetcher.get_latest_bars(self.symbol)[-1].timestamp.date()
-            today_signals_found = False
-
-            for signal_file in signals_dir.glob(f"{self.symbol}_*.json"):
-                try:
-                    filename_parts = signal_file.stem.split('_')
-                    if len(filename_parts) >= 2:
-                        file_date_str = filename_parts[1]
-                        file_date = datetime.strptime(file_date_str, '%Y%m%d').date()
-                        if file_date == current_date:
-                            with open(signal_file, 'r') as f:
-                                signal_data = json.load(f)
-                            loaded_signal = Signal.from_dict(cls=Signal, data=signal_data)
-                            self.logger.warning(
-                                f"Loaded today's signal from {signal_file.name}: "
-                                f"{loaded_signal.action.value} @ {loaded_signal.entry_price}"
-                            )
-                            last_signal_date = current_date
-                            signal = loaded_signal
-                            today_signals_found = True
-                except Exception as e:
-                    self.logger.warning(f"Error loading signal from {signal_file.name}: {e}")
-                    continue
-
-            if today_signals_found:
-                self.logger.warning(
-                    f"Today's signals loaded for {self.symbol}. "
-                    f"Will skip signal generation until next day."
-                )
-        except Exception as e:
-            self.logger.error(f"Error loading today's signals for {self.symbol}: {e}")
-
-        try:
-            while not (stop_event and stop_event.is_set()):
-                current_bar_list = fetcher.get_latest_bars(self.symbol)
-                if current_bar_list:
-                    current_datetime = current_bar_list[-1].timestamp
-                    current_date = current_datetime.date()
-                else:
-                    continue
-
-                # Check daily signal limit
-                if last_signal_date == current_date:
-                    self.logger.warning(
-                        f"{self.symbol}: Signal already generated today, "
-                        f"skipping until next day, "
-                        f"{signal}"
-                    )
-                    check_interval = 1800
-                    recent_orders = self.mt5.get_today_signals()
-                    for sig in recent_orders:
-                        if sig.ticket == signal.ticket:
-                            signal = sig
-                            break
-                    goodtimes.sleep(check_interval)
-                    continue
-
-                # Fetch and update bars
-                self._fetch_and_update_bars(
-                    symbol=self.symbol,
-                    fetcher=fetcher,
-                    last_bar_time=self.all_bars[-1].timestamp if self.all_bars else None
-                )
-
-                # Attempt signal
-                signal = self.attempt_signal(current_datetime)
-                if signal is None:
-                    goodtimes.sleep(check_interval)
-                    continue
-
-                # ── Place order: retry for up to 5 minutes, then treat as daily limit ──
-                order_placed = False
-                place_order_deadline = goodtimes.time() + 5 * 60  # 5 minutes from now
-                while goodtimes.time() < place_order_deadline:
-                    if self.mt5.place_order(signal):
-                        order_placed = True
-                        self.logger.warning(f"Order placed successfully: {signal}")
-                        break
-                    self.logger.warning(
-                        f"Failed to place order, retrying immediately: {signal}"
-                    )
-
-                if not order_placed:
-                    self.logger.error(
-                        f"Could not place order for {self.symbol} after 5 minutes. "
-                        f"Treating as daily signal limit — skipping until next day."
-                    )
-                    last_signal_date = current_date  # enter daily-limit state
-                    check_interval = 1800
-                    goodtimes.sleep(check_interval)
-                    continue
-                # ───────────────────────────────────────────────────────────────────────
-
-                # Save signal JSON using to_dict()
-                signal_data = signal.to_dict()
-                signal_filename = (
-                    f"{self.symbol}_"
-                    f"{signal.timestamp.strftime('%Y%m%d_%H%M%S')}.json"
-                )
-                signal_filepath = signals_dir / signal_filename
-                try:
-                    with open(signal_filepath, 'w') as f:
-                        json.dump(signal_data, f, indent=2, default=str)
-                    self.logger.info(f"Signal saved: {signal_filepath}")
-                except Exception as e:
-                    self.logger.error(f"Failed to save signal JSON: {e}")
-
-                # Update daily limit
-                last_signal_date = current_date
-                goodtimes.sleep(check_interval)
-
-        except KeyboardInterrupt:
-            self.logger.info("Live trading interrupted")
-        except Exception as e:
-            self.logger.error(f"Unexpected error in live trading: {e}", exc_info=True)
-        finally:
-            self.logger.info(f"Live trading ended for {self.symbol}")
-
-
-    def _fetch_and_update_bars(self, symbol, fetcher: DataFetcher, last_bar_time=None):
-        """
-        Fetch bars from MT5 and update self.all_bars.
-        Only adds completed bars (not forming candle).
-        
-        On first call (empty all_bars), fetches MBox bars to initialize history.
-        """
-        try:
-            # Initialize with MBox bars on first run
-            if not self.all_bars:
-                self.logger.info(f"Initializing bars for {symbol} with MBox history...")
-                
-                try:
-                    
-                    # Get current time from broker
-                    current_bars = fetcher.get_latest_bars(symbol=symbol)
-                    
-                    if not current_bars:
-                        self.logger.warning(f"Could not fetch current time for {symbol}")
-                        return []
-                    
-                    # get current broker time from latest bar
-                    current_broker_time = current_bars[-1].timestamp
-                    
-                    # Calculate MBox start (04:30 in broker timezone)
-                    mbox_start_str = settings.get('strategies.two_hunters.mbox_time.start', '04:30')
-                    mbox_start_datetime = datetime.combine(current_broker_time.date(), datetime.strptime(mbox_start_str, '%H:%M').time())
-
-                    # Fetch bars from MBox start to now
-                    mbox_bars = fetcher.fetch_bars_from_mt5(
-                        start_dt=mbox_start_datetime,
-                        end_dt=current_broker_time,
-                        symbol=symbol,
-                        timeframe='M1'
-                    )
-                    
-                    if mbox_bars:
-                        self.all_bars.extend(mbox_bars)
-                        self.logger.info(
-                            f"Loaded {len(mbox_bars)} bars for {symbol} "
-                            f"from {mbox_start_datetime} to {current_broker_time}"
-                        )
-                    else:
-                        self.logger.warning(f"No MBox bars fetched for {symbol}")
-                        
-                except Exception as e:
-                    self.logger.error(f"Error loading MBox bars for {symbol}: {e}")
-                    # Continue with normal flow even if MBox load fails
-            
-            # Normal bar fetching
-            fetched_bars = fetcher.get_latest_bars(
-                symbol=symbol,
-                count=10  # Fetch last 10 bars to ensure we get the latest completed one especially if we missed some during dowontime
-            )
-            
-            if not fetched_bars:
-                self.logger.warning(f"Could not fetch latest bars for {symbol}")
-                return []
-            
-            current_time = fetched_bars[-1].timestamp
-            
-            for bar in fetched_bars:
-                # Skip already processed bars
-                if last_bar_time and bar.timestamp <= last_bar_time:
-                    continue
-                
-                # Skip forming bar (< 1 min old)
-                minutes_since_bar = (
-                    (current_time - bar.timestamp).total_seconds() / 60
-                )
-                
-                if minutes_since_bar < 1:
-                    continue
-                
-                # Add to strategy
-                self.all_bars.append(bar)
-                
-                self.logger.debug(
-                    f"Bar added {symbol}: "
-                    f"{bar.timestamp.strftime('%Y-%m-%d %H:%M:%S')} "
-                    f"O:{bar.open:.5f} C:{bar.close:.5f}"
-                )
-
-        except Exception as e:
-            self.logger.error(f"Error fetching bars for {symbol}: {e}")
-            return []

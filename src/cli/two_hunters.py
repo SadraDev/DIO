@@ -110,6 +110,12 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
     settings.set("account.default_risk_percent", risk) if risk is not None else None
     settings.set("account.balance", balance) if balance is not None else None
 
+    if balance is None:
+        balance = settings.get("account.balance", None)
+    
+    if risk is None:
+        risk = settings.get("account.default_risk_percent", None)
+
     budget = Budget(initial_balance=balance, initial_risk_percent=risk)
     twohunters = TwoHunters(budget=budget, use_trend_flag=use_trend_flag, use_time_flag=use_time_flag)
 
@@ -132,12 +138,12 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
         click.echo(f"Period:                         {start_date.date()} to {end_date.date()}")
         click.echo(f"Balance:                        ${balance:,} | Risk: {risk:.1%}")
         click.echo(f"Flags:")
-        click.echo(f"    Risk Manager:               {'-Active' if use_risk_manager else '-DeActive'}")
-        click.echo(f"    2R for EURUSD:              {'-Active' if use_2r_for_eur else '-DeActive'}")
-        click.echo(f"    Online Commission Manager:  {'-Active' if use_online_commission_manager else '-DeActive'}")
-        click.echo(f"    Offline Commission Manager: {'-Active' if use_offline_commission_manager else '-DeActive'}")
-        click.echo(f"    Reports:                    {'-Active' if not no_reports else '-DeActive'}")
-        click.echo(f"    Charts:                     {'-Active' if not no_plots else '-DeActive'}")
+        click.echo(f"    Risk Manager:                   {'-Active' if use_risk_manager else '-DeActive'}")
+        click.echo(f"    2R for EURUSD:                  {'-Active' if use_2r_for_eur else '-DeActive'}")
+        click.echo(f"    Online Commission Manager:      {'-Active' if use_online_commission_manager else '-DeActive'}")
+        click.echo(f"    Offline Commission Manager:     {'-Active' if use_offline_commission_manager else '-DeActive'}")
+        click.echo(f"    Reports:                        {'-Active' if not no_reports else '-DeActive'}")
+        click.echo(f"    Charts:                         {'-Active' if not no_plots else '-DeActive'}")
         click.echo(f"        Show Mbox:                  {'-Active' if not no_mbox else '-DeActive'}") if not no_plots else None
         click.echo(f"        Show Positions:             {'-Active' if not no_signals else '-DeActive'}") if not no_plots else None
         click.echo(f"        Show 15M candles:           {'-Active' if show_15m_bars else '-DeActive'}") if show_15m_bars else None
