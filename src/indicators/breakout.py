@@ -50,8 +50,7 @@ class BreakoutEngine(BaseIndicator):
             return self.recovery(args["recovery_bars"], args["extended_mbox_results"])
         
         elif self.type == BreakoutType.CUSTOM:
-            return self.custom(args["session_bars"], args["mbox_result"], args["london_results"],
-                               args["newyork_results"], args["fvg_results"], args["failed_signal"])
+            return self.custom(args["session_bars"], args["failed_signal"])
         
         else:
             raise ValueError(f"Unknown BreakoutType: {self.type}")
@@ -112,16 +111,32 @@ class BreakoutEngine(BaseIndicator):
 
         def fvg_nearby(bar, direction):
             return False
-            fvg_results = self.fvg_detector.get_nearby_active_fvgs(bar=bar, symbol=self.symbol, pip_size=5.0)
+            fvg_results = self.fvg_detector.get_nearby_active_fvgs(bar=bar, symbol=self.symbol, pip_size=10.0)
 
             if fvg_results:
+                bullishes = []
+                bearishes = []
                 for tf in fvg_results:
                     for fvg in fvg_results[tf]:
-                        if direction == "BUY"  and fvg['type'] == 'bullish': return True
-                        if direction == "SELL" and fvg['type'] == 'bearish': return True
+                        if fvg['type'] == 'bullish':
+                            bullishes.append(fvg['high'])
+                        if fvg['type'] == 'bearish':
+                            bearishes.append(fvg['low'])
+            
+                bullishes.sort(reverse=True)
+                bearishes.sort()
+                
+                if direction == "BUY" and bullishes:
+                    return bullishes[0]
+
+                if direction == "SELL" and bearishes:
+                    return bearishes[0]
+
             return False
 
         n = len(session_bars)
+        up_num_hunt = self.num_hunt
+        down_num_hunt = self.num_hunt
         for i, bar in enumerate(session_bars):
             if i + lookahead >= n:
                 break
@@ -140,22 +155,22 @@ class BreakoutEngine(BaseIndicator):
                 breakout_stage_up += 1
                 max_val = current_max
 
-                if breakout_stage_up >= self.num_hunt:
+                if breakout_stage_up >= up_num_hunt:
                     if bar.timestamp.time() < self._get_threshold_time():
-                        self.num_hunt += 1
+                        up_num_hunt += 1
 
                     signal_bar = self.find_signal_bar(session_bars, bar, "SELL")
-                    
                     if signal_bar:
                         if not _15_triggered and not valid(bar):
-                            self.num_hunt += 1
+                            up_num_hunt += 1
                             _15_triggered = True
                             signal_bar = None
                             continue
                         
-                        if fvg_nearby(bar, "SELL"):
-                            self.num_hunt += 1
-                            _fvg_nearby_triggered = True 
+                        if fvg_nearby(bar, "SELL") and not _fvg_nearby_triggered:
+                            up_num_hunt += 1
+                            max_val = fvg_nearby(bar, "SELL")
+                            _fvg_nearby_triggered = True
                             signal_bar = None
                             continue
 
@@ -163,27 +178,30 @@ class BreakoutEngine(BaseIndicator):
                         return extrema, signal_bar, "SELL", bar, None
                     
                     else:
-                        self.num_hunt += 1
+                        up_num_hunt += 1
                         continue
 
             elif is_local_min and current_min < min_val:
+                
                 breakout_stage_down += 1
                 min_val = current_min
 
-                if breakout_stage_down >= self.num_hunt:
+                if breakout_stage_down >= down_num_hunt:
                     if bar.timestamp.time() < self._get_threshold_time():
-                        self.num_hunt += 1
-
+                        down_num_hunt += 1
+                
                     signal_bar = self.find_signal_bar(session_bars, bar, "BUY")
                     if signal_bar:
                         if not _15_triggered and not valid(bar):
-                            self.num_hunt += 1
+                            down_num_hunt += 1
                             _15_triggered = True
                             signal_bar = None
                             continue
-
-                        if fvg_nearby(bar, "BUY"):
-                            self.num_hunt += 1
+                        
+                        if fvg_nearby(bar, "BUY") and not _fvg_nearby_triggered:
+                            down_num_hunt += 1
+                            max_val = fvg_nearby(bar, "BUY")
+                            _fvg_nearby_triggered = True
                             signal_bar = None
                             continue
                         
@@ -191,8 +209,9 @@ class BreakoutEngine(BaseIndicator):
                         return extrema, signal_bar, "BUY", bar, None
 
                     else:
-                        self.num_hunt += 1
+                        down_num_hunt += 1
                         continue
+
 
         return None, None, None, None, None
 
@@ -264,21 +283,15 @@ class BreakoutEngine(BaseIndicator):
     def custom(
         self,
         session_bars: list[Bar],
-        mbox_result: dict,
-        london_results: dict,
-        newyork_results: dict,
-        fvgs: Bar, #Dict[str, List[Dict[str, Any]]],
         signal: Signal,
     ) -> Tuple[Optional[float], Optional[Bar], Optional[str], Optional[Bar], Optional[dict]]:
 
         if not session_bars:
             return None, None, None, None, None
 
-        # fvgs = self.fvg_detector.get_nearby_active_fvgs(bar=bar, symbol=self.symbol, pip_size=5.0)
         results: dict = {}
         num_hunt: int = 1
-        current_bar = fvgs
-        fvgs = self.fvg_detector.get_nearby_active_fvgs(bar=current_bar, symbol=self.symbol, pip_size=50.0)
+        fvgs = self.fvg_detector.get_nearby_active_fvgs(bar=session_bars[0], symbol=self.symbol, pip_size=5000.0)
         all_fvgs = fvgs.get("M15", []) + fvgs.get("H1", []) + fvgs.get("H4", []) + fvgs.get("H8", []) + fvgs.get("london", []) + fvgs.get("newyork", [])
         bellow_breakout_candidates = []
         above_breakout_candidates  = []
@@ -286,17 +299,9 @@ class BreakoutEngine(BaseIndicator):
         results['take_profit'] = None
         results['stop_loss'] = None
 
-
         for fvg in all_fvgs:
-            # if current_bar.timestamp <= datetime.fromisoformat(fvg.get("detection_time")):
-            #     continue
-                        
-            if current_bar.timestamp - datetime.fromisoformat(fvg.get("detection_time")) > timedelta(days=7):
+            if session_bars[0].timestamp - datetime.fromisoformat(fvg.get("detection_time")) > timedelta(days=700):
                 continue
-
-            # if fvg.get("filled_timestamp") and datetime.fromisoformat(fvg.get("filled_timestamp")) < current_bar.timestamp:
-            #     continue
-
             if fvg.get("type") == "bullish":
                 bellow_breakout_candidates.append(fvg)
 
@@ -311,7 +316,7 @@ class BreakoutEngine(BaseIndicator):
             this_fvg = above_breakout_candidates[i]
             above_fvg = above_breakout_candidates[i+1]
 
-            # if the distance between fvgs are less that 10 pips, remove the one in the bottom.
+            # if the distance between fvgs are less that 5 pips, remove the one in the bottom.
             if abs(above_fvg['low'] - this_fvg['high']) / 0.0001 <= 5: 
                 to_remove.append(this_fvg)
 
@@ -329,13 +334,15 @@ class BreakoutEngine(BaseIndicator):
 
         for fvg in to_remove:
             bellow_breakout_candidates.remove(fvg)
-
-        lookahead: int = 1
-        n = len(session_bars)
         
-        min_val = (bellow_breakout_candidates[0]["high"] + bellow_breakout_candidates[0]["low"]) / 2 if bellow_breakout_candidates else float("-inf")
-        max_val = (above_breakout_candidates[0]["high"] + above_breakout_candidates[0]["low"]) / 2 if above_breakout_candidates  else float("inf")
+        # min_val = (bellow_breakout_candidates[0]["high"] + bellow_breakout_candidates[0]["low"]) / 2 if bellow_breakout_candidates else float("-inf")
+        # max_val = (above_breakout_candidates[0]["high"] + above_breakout_candidates[0]["low"]) / 2 if above_breakout_candidates  else float("inf")
 
+        min_val = bellow_breakout_candidates[0]["high"] if bellow_breakout_candidates else float("-inf")
+        max_val = above_breakout_candidates[0]["low"]   if above_breakout_candidates  else float("inf")
+
+        n = len(session_bars)
+        lookahead: int = 1
         breakout_up = 0
         breakout_down = 0
         for i, bar in enumerate(session_bars):
@@ -353,19 +360,6 @@ class BreakoutEngine(BaseIndicator):
             )
 
             if bellow_breakout_candidates and is_local_min and current_min < min_val:
-                # if current_hunt_down_ts and bar.timestamp - current_hunt_down_ts > timedelta(hours=1):
-                #     try:
-
-                #         bellow_breakout_candidates.pop(0)
-                #         min_val = bellow_breakout_candidates[0]["high"]
-                #         breakout_down = 0
-                #         continue
-                    
-                #     except:
-                #         return None, None, None, None, None
-                
-                # else:
-                #     current_hunt_down_ts = bar.timestamp
 
                 breakout_down += 1
                 min_val = current_min
@@ -385,18 +379,6 @@ class BreakoutEngine(BaseIndicator):
                         continue
 
             if above_breakout_candidates and is_local_max and current_max > max_val:
-                # if current_hunt_up_ts and bar.timestamp - current_hunt_up_ts > timedelta(hours=1):
-                #     try:
-                #         above_breakout_candidates.pop(0)
-                #         max_val = above_breakout_candidates[0]["low"]
-                #         breakout_up = 0
-                #         continue
-                    
-                #     except:
-                #         return None, None, None, None, None
-                
-                # else:
-                #     current_hunt_up_ts = bar.timestamp
 
                 breakout_up += 1
                 max_val = current_max
@@ -417,113 +399,6 @@ class BreakoutEngine(BaseIndicator):
 
 
         return None, None, None, None, None
-
-    # def custom(
-    #     self,
-    #     session_bars: List[Bar],
-    #     mbox_result: dict,
-    #     london_results: dict,
-    #     newyork_results: dict,
-    #     fvgs: Dict[str, List[Dict[str, Any]]],
-    # ) -> Tuple[Optional[float], Optional[Bar], Optional[str], Optional[Bar], Optional[dict]]:
-
-    #     if not session_bars:
-    #         return None, None, None, None, None
-        
-    #     results = {}
-    #     current_bar = session_bars[0]
-    #     all_fvgs = fvgs.get("M15", []) + fvgs.get("H1", []) + fvgs.get("H4", []) + fvgs.get("H8", [])
-
-    #     bellow_breakout_candidates = []
-    #     above_breakout_candidates  = []
-
-    #     results['take_profit'] = None
-    #     results['stop_loss'] = None
-
-    #     if london_results:
-    #         for result in london_results:
-    #             bellow_breakout_candidates.append({
-    #                 "type": "bullish",
-    #                 "high": result.get("min_val"),
-    #                 "low": -float("inf"),
-    #                 "size_pips": 0.0,
-    #                 "bar_open_time": result.get("timestamp"),
-    #                 "detection_time": result.get("timestamp"),
-    #                 "filled_timestamp": None
-    #             })
-    #             above_breakout_candidates.append({
-    #                 "type": "bearish",
-    #                 "high": float("inf"),
-    #                 "low": result.get("max_val"),
-    #                 "size_pips": 0.0,
-    #                 "bar_open_time": result.get("timestamp"),
-    #                 "detection_time": result.get("timestamp"),
-    #                 "filled_timestamp": None
-    #             })
-
-    #     if newyork_results:
-    #         for result in newyork_results:
-    #             bellow_breakout_candidates.append({
-    #                 "type": "bullish",
-    #                 "high": result.get("min_val"),
-    #                 "low": -float("inf"),
-    #                 "size_pips": 0.0,
-    #                 "bar_open_time": result.get("timestamp"),
-    #                 "detection_time": result.get("timestamp"),
-    #                 "filled_timestamp": None
-    #             })
-    #             above_breakout_candidates.append({
-    #                 "type": "bearish",
-    #                 "high": float("inf"),
-    #                 "low": result.get("max_val"),
-    #                 "size_pips": 0.0,
-    #                 "bar_open_time": result.get("timestamp"),
-    #                 "detection_time": result.get("timestamp"),
-    #                 "filled_timestamp": None
-    #             })
-
-    #     for fvg in all_fvgs:
-    #         if current_bar.timestamp <= datetime.fromisoformat(fvg.get("detection_time")):
-    #             continue
-
-    #         if fvg.get("filled_timestamp") and datetime.fromisoformat(fvg.get("filled_timestamp")) <= current_bar.timestamp:
-    #             continue
-
-    #         if fvg.get("type") == "bullish":
-    #             bellow_breakout_candidates.append(fvg)
-
-    #         elif fvg.get("type") == "bearish":
-    #             above_breakout_candidates.append(fvg)
-
-    #     bellow_breakout_candidates.sort(key=lambda l: l["high"], reverse=True)
-    #     above_breakout_candidates.sort(key=lambda l: l["low"])
-
-    #     for bar in session_bars:
-    #         if bellow_breakout_candidates and bar.low <= bellow_breakout_candidates[0]["high"]:
-    #             signal_bar = self.find_signal_bar(session_bars, bar, "BUY")
-    #             if signal_bar:
-    #                 if signal_bar.open < bellow_breakout_candidates[0]["low"]: 
-    #                     signal_bar = None
-    #                     bellow_breakout_candidates.pop(0)
-    #                     continue
-
-    #                 extrema = self.find_extrema_between_two_bars(bar, signal_bar, session_bars, "BUY")
-    #                 # extrema = bellow_breakout_candidates[0]["low"]
-    #                 return extrema, signal_bar, "BUY", bar, results
-                
-    #         if above_breakout_candidates and bar.high >= above_breakout_candidates[0]["low"]:
-    #             signal_bar = self.find_signal_bar(session_bars, bar, "SELL")
-    #             if signal_bar:
-    #                 if signal_bar.open > above_breakout_candidates[0]["high"]: 
-    #                     signal_bar = None
-    #                     above_breakout_candidates.pop(0)
-    #                     continue
-
-    #                 extrema = self.find_extrema_between_two_bars(bar, signal_bar, session_bars, "SELL")
-    #                 # extrema = above_breakout_candidates[0]["high"]
-    #                 return extrema, signal_bar, "SELL", bar, results
-
-    #     return None, None, None, None, None
 
     def find_signal_bar(self, bars: List[Bar], hunter_bar: Bar, direction: str, look_ahead: int = 3) -> Optional[Bar]:
         """
@@ -593,56 +468,6 @@ class BreakoutEngine(BaseIndicator):
                 return this_bar
 
         return None
-
-    # def find_signal_bar(self, bars: List[Bar], hunter_bar: Bar, direction: str, look_ahead: int = 3) -> Optional[Bar]:
-    #     """
-    #     Find the actual order signal bar that follows a breakout (hunter bar).
-    #     """
-    #     try:
-    #         idx = bars.index(hunter_bar)
-    #     except ValueError:
-    #         return None
-
-    #     for i in range(idx + 1, idx + look_ahead):
-    #         this_bar: Bar = bars[i]
-    #         prev_bar: Bar = bars[i - 1] if i > 0 else bars[0]
-
-    #         if self._is_order_bar(prev_bar, this_bar, direction):
-
-    #             # Skip weak bars going backwards until a strong one is found
-    #             search_idx = i - 1
-    #             while search_idx >= 0 and bars[search_idx].is_weak:
-    #                 search_idx -= 1
-
-    #             if search_idx >= 0:
-    #                 prev_bar = bars[search_idx]
-
-    #             signal = self._is_order_bar(prev_bar, this_bar, direction)
-    #             if signal:
-    #                 return signal
-
-    #     return None
-
-    # def _is_order_bar(self, prev_bar: Bar, this_bar: Bar, direction: str) -> Optional[Bar]:
-    #     """
-    #     Check if this_bar is valid for order placement based on previous bar and direction.
-    #     """
-    #     if this_bar.is_weak:
-    #         return None
-        
-    #     _m = settings.get("strategies.two_hunters.flags.order_block_significance")
-
-    #     if direction == 'SELL':
-    #         # Bearish momentum confirmation
-    #         if this_bar.close < prev_bar.low - (prev_bar.range*_m) and this_bar.is_bearish:
-    #             return this_bar
-
-    #     elif direction == 'BUY':
-    #         # Bullish momentum confirmation
-    #         if this_bar.close > prev_bar.high + (prev_bar.range*_m) and this_bar.is_bullish:
-    #             return this_bar
-
-    #     return None
 
     def find_extrema_between_two_bars(self, hunter_bar: Bar, signal_bar: Bar, bars: List[Bar], action: str) -> float:
         """

@@ -26,9 +26,9 @@ class ReportGenerator:
         """Generate comprehensive trading report with symbol-separated charts"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         reportdir = self.report_dir / f"{timestamp}"
-        reportdir.mkdir(parents=True, exist_ok=True)
 
         if not flags['no_reports'] and not flags['no_plots']:
+            reportdir.mkdir(parents=True, exist_ok=True)
             self.logger.info("Generating plots and reports. This will take time..")
 
         if flags['no_reports'] and flags['no_plots']:
@@ -37,6 +37,7 @@ class ReportGenerator:
         # Generate charts organized by symbol
         chartpaths = {}
         if not flags.get("no_plots"):
+            reportdir.mkdir(parents=True, exist_ok=True)
             self.logger.info(f"Generating {flags.get('display_range')} charts for symbols separatly...")
             chartpaths = self.plotter.generate_charts(
                 date_range=date_range,
@@ -53,6 +54,7 @@ class ReportGenerator:
         # Generate main report
         comparisonpath = None
         if len(symbols) >= 1 and not flags.get("no_reports"):
+            reportdir.mkdir(parents=True, exist_ok=True)
             self.logger.info("Generating main report...")
             comparisonpath = self.plotter.create_symbol_comparison_report(
                 results=results,

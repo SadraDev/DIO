@@ -25,7 +25,7 @@ class FVGDetector(BaseIndicator):
         self,
         symbols: Optional[List[str]] = None,
         min_gap_pips: float = 3.5,
-        max_gap_pips: float = 20.0,
+        max_gap_pips: float = float("inf"),
         timeframes: Optional[List[str]] = None,
     ):
         """
@@ -39,11 +39,11 @@ class FVGDetector(BaseIndicator):
             timeframes: List of timeframes to analyze (e.g., 'M1', 'M15', 'H1')
         """
         super().__init__("FVGDetector")
-        self.symbols = symbols or ["GBPUSD.", "EURUSD."]
+        self.symbols = symbols or ["GBPUSD", "EURUSD"]
         self.fetcher = DataFetcher()
         self.min_gap_pips = min_gap_pips
         self.max_gap_pips = max_gap_pips
-        self.timeframes = timeframes or ["M15", "H1", "H4", "H8"]
+        self.timeframes = timeframes or ["M15", "H1", "H4", "H8", "london", "newyork"]
         
         # Get pip size from config (standard FX)
         self.pip_size = 0.0001
@@ -281,7 +281,7 @@ class FVGDetector(BaseIndicator):
 
         for symbol, tf_results in self.fvgs.items():
             self.ensure_symbol_storage(symbol)
-            
+
             for tf, current_fvgs in tf_results.items():
                 if tf not in self.fvgs[symbol]:
                     self.fvgs[symbol][tf] = []
@@ -293,15 +293,15 @@ class FVGDetector(BaseIndicator):
                             datetime.fromisoformat(fvg["bar_open_time"])
                             for fvg in self.fvgs[symbol][tf]
                         )
+                        
                         check_bars = self.fetcher.fetch_bars_from_mt5(
                             oldest_fvg_time,
-                            datetime.now(),
+                            datetime.now() + timedelta(days=1),
                             symbol,
                             "M1",
                         )
                     else:
                         check_bars = []
-                    
                     # Mark filled FVGs and filter out violated ones
                     active_fvgs: List[Dict[str, Any]] = []
                     
@@ -323,6 +323,7 @@ class FVGDetector(BaseIndicator):
                     self.fvgs[symbol][tf] = active_fvgs
                 
                 except Exception as e:
+                    print(e)
                     # In case of error, keep existing + add new (with duplicate check)
                     self.fvgs[symbol][tf] = self._merge_fvg_list(
                         self.fvgs[symbol][tf], 

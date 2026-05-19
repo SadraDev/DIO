@@ -165,7 +165,7 @@ class DataFetcher:
             rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
             
             if rates is None or len(rates) == 0:
-                self.logger.warning(f"No rates returned for {symbol}")
+                # self.logger.warning(f"No rates returned for {symbol}")
                 return []
 
             bars = []

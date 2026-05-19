@@ -61,11 +61,12 @@ class Signal:
         self.outcome_timestamp: Optional[datetime] = None
         self.exit_pips: Optional[float] = None
         self.exit_price: Optional[float] = None
-        self.gain = gain
+        self.gain = gain if gain else 0.0
         
         # Order execution details
         self.ticket = ticket  # Broker order ticket ID
         self.commission = None
+        self.is_order: bool = False
         
         # Strategy flags and metadata
         self.trend = None
@@ -119,7 +120,7 @@ class Signal:
     def update_outcome(self, outcome: SignalOutcome, gain: float, timestamp: Optional[datetime] = None):
         """Update signal outcome"""
         self.outcome = outcome
-        self.gain = gain
+        self.gain += gain
         self.outcome_timestamp = timestamp or datetime.now()
     
     def adjust_stop_loss(self, new_stop_loss: float, reason: str):
@@ -137,7 +138,7 @@ class Signal:
         log_signal_event("risk_free_activated", self.symbol, self.action.value,
                         entry_price=self.entry_price, current_sl=self.stop_loss)
     
-    # MAIN EVALUATION METHOD - COMPLETELY REWRITTEN WITH SINGLE LOOP
+    # MAIN EVALUATION METHOD
     def evaluate_signal(self, budget = None, force_stop_dt: datetime = None, max_fetch_attempts: int = 5) -> Optional['Bar']:
         """
         Evaluate signal outcome with SINGLE-LOOP processing and automatic bar fetching
@@ -151,6 +152,9 @@ class Signal:
         # Calculate position size using Budget's ratio_amount if not set
         fetch_attempts = 1
         commission_value = settings.get("trading.commission")
+
+        self.commission = self.entry_lot * commission_value
+        self.gain -= self.commission
 
         # MAIN EVALUATION LOOP WITH AUTOMATIC BAR FETCHING
         while not self.is_completed and fetch_attempts <= max_fetch_attempts:
@@ -171,28 +175,47 @@ class Signal:
                     fetch_attempts += 1
                     continue
             
+            if self.is_order:
+                touched_bar: Bar = None
+
+                for bar in evaluation_bars: 
+                    if self.action == SignalAction.SELL:
+                        if bar.high >= self.entry_price:
+                            touched_bar = bar
+                            break
+
+                    if self.action == SignalAction.BUY:
+                        if bar.low <= self.entry_price:
+                            touched_bar = bar
+                            break
+
+                if not touched_bar:
+                    if fetch_attempts < max_fetch_attempts:
+                        fetch_attempts += 1
+                        continue
+                    else:
+                        break
+
+                evaluation_bars = [bar for bar in evaluation_bars if bar.timestamp > touched_bar.timestamp]
+
+            sell_tp_triggered = False
+            buy_tp_triggered = False
             # SINGLE LOOP: Process bars chronologically  
             for bar in evaluation_bars:
-
-                # === STEP 1: APPLY ORDER MANAGEMENT (if any enabled) ===
-                # if self.signal_type == SignalType.RECOVERY:
-                self.online_order_manager(bar, budget)
 
                 if force_stop_dt and bar.timestamp >= force_stop_dt:
                     action = "SELL" if self.action == SignalAction.SELL else "BUY"
                     self.exit_price = bar.open
                     actual_gain = budget.calculate_gain_loss(
-                        self.symbol, self.initial_entry_price, self.exit_price,
+                        self.symbol, self.entry_price, self.exit_price,
                         self.entry_lot, action
                     )
                     
                     self.update_outcome(SignalOutcome.FORCE_STOPED, actual_gain, bar.timestamp)
-                    self.commission = self.entry_lot * commission_value
-                    self.gain -= self.commission
 
                     log_signal_event("signal_force_stoped", self.symbol, self.action.value,
                                     gain=actual_gain, exit_price=self.exit_price,
-                                    pips=budget.pips_from_diff(abs(self.initial_entry_price - self.exit_price)),
+                                    pips=budget.pips_from_diff(abs(self.entry_price - self.exit_price)),
                                     lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
                                     fetch_attempts=fetch_attempts)
                     break
@@ -201,16 +224,17 @@ class Signal:
                 if self.action == SignalAction.SELL:
                     # Take Profit hit (price going down)
                     if bar.low <= self.take_profit:
+                        sell_tp_triggered = True
                         self.exit_price = self.take_profit
                         actual_gain = budget.calculate_gain_loss(
-                            self.symbol, self.initial_entry_price, self.exit_price, 
+                            self.symbol, self.entry_price, self.exit_price, 
                             self.entry_lot, "SELL"
                         )
                         
                         self.update_outcome(SignalOutcome.WIN, actual_gain, bar.timestamp)
                         log_signal_event("signal_win", self.symbol, self.action.value,
                                         gain=actual_gain, exit_price=self.exit_price,
-                                        pips=budget.pips_from_diff(abs(self.initial_entry_price - self.exit_price)),
+                                        pips=budget.pips_from_diff(abs(self.entry_price - self.exit_price)),
                                         lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
                                         fetch_attempts=fetch_attempts)
                     
@@ -218,67 +242,76 @@ class Signal:
                     if bar.high >= self.stop_loss:
                         self.exit_price = self.stop_loss
                         actual_loss = budget.calculate_gain_loss(
-                            self.symbol, self.initial_entry_price, self.stop_loss,
+                            self.symbol, self.entry_price, self.stop_loss,
                             self.entry_lot, "SELL"
                         )
 
-                        if self.initial_entry_price <= self.stop_loss:
-                            self.update_outcome(SignalOutcome.LOSS, actual_loss, bar.timestamp)
-                            log_signal_event("signal_loss", self.symbol, self.action.value,
-                                            loss=actual_loss, exit_price=self.stop_loss,
-                                            pips=budget.pips_from_diff(abs(self.stop_loss - self.initial_entry_price)),
-                                            lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
-                                            fetch_attempts=fetch_attempts)
-                        else:
-                            self.update_outcome(SignalOutcome.WIN, actual_loss, bar.timestamp)
-                            log_signal_event("signal_win", self.symbol, self.action.value,
-                                            gain=actual_loss, exit_price=self.stop_loss,
-                                            pips=budget.pips_from_diff(abs(self.initial_entry_price - self.stop_loss)),
-                                            lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
-                                            fetch_attempts=fetch_attempts)
+                        self.update_outcome(SignalOutcome.LOSS, actual_loss, bar.timestamp)
+                        log_signal_event("signal_loss", self.symbol, self.action.value,
+                                        loss=actual_loss, exit_price=self.stop_loss,
+                                        pips=budget.pips_from_diff(abs(self.stop_loss - self.entry_price)),
+                                        lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
+                                        fetch_attempts=fetch_attempts)
+
+                    # Initial Take Profit hit (price going down)
+                    if bar.low <= self.initial_take_profit and not sell_tp_triggered:
+                        sell_tp_triggered = True
+                        self.entry_lot = self.entry_lot / 2
+                        self.exit_price = self.initial_take_profit
                         
+                        actual_gain = budget.calculate_gain_loss(
+                            self.symbol, self.entry_price, self.exit_price, 
+                            self.entry_lot, "SELL"
+                        )
+
+                        self.gain += actual_gain
+                    
                 elif self.action == SignalAction.BUY:
                     # Take Profit hit (price going up)
                     if bar.high >= self.take_profit:
+                        buy_tp_triggered = True
                         self.exit_price = self.take_profit
                         actual_gain = budget.calculate_gain_loss(
-                            self.symbol, self.initial_entry_price, self.take_profit,
+                            self.symbol, self.entry_price, self.take_profit,
                             self.entry_lot, "BUY"
                         )
                         
                         self.update_outcome(SignalOutcome.WIN, actual_gain, bar.timestamp)
                         log_signal_event("signal_win", self.symbol, self.action.value,
                                         gain=actual_gain, exit_price=self.exit_price,
-                                        pips=budget.pips_from_diff(abs(self.exit_price - self.initial_entry_price)),
+                                        pips=budget.pips_from_diff(abs(self.exit_price - self.entry_price)),
                                         lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
                                         fetch_attempts=fetch_attempts)
                     
                     # Stop Loss hit (price going down)
-                    elif bar.low <= self.stop_loss:
+                    if bar.low <= self.stop_loss:
                         self.exit_price = self.stop_loss
                         actual_loss = budget.calculate_gain_loss(
-                            self.symbol, self.initial_entry_price, self.stop_loss,
+                            self.symbol, self.entry_price, self.stop_loss,
                             self.entry_lot, "BUY"
                         )
                         
-                        if self.initial_entry_price >= self.stop_loss:
-                            self.update_outcome(SignalOutcome.LOSS, actual_loss, bar.timestamp)
-                            log_signal_event("signal_loss", self.symbol, self.action.value,
-                                            loss=actual_loss, exit_price=self.stop_loss,
-                                            pips=budget.pips_from_diff(abs(self.initial_entry_price - self.stop_loss)),
-                                            lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
-                                            fetch_attempts=fetch_attempts)
-                        else:
-                            self.update_outcome(SignalOutcome.WIN, actual_loss, bar.timestamp)
-                            log_signal_event("signal_win", self.symbol, self.action.value,
-                                            gain=actual_loss, exit_price=self.stop_loss,
-                                            pips=budget.pips_from_diff(abs(self.stop_loss - self.initial_entry_price)),
-                                            lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
-                                            fetch_attempts=fetch_attempts)
-            
+                        self.update_outcome(SignalOutcome.LOSS, actual_loss, bar.timestamp)
+                        log_signal_event("signal_loss", self.symbol, self.action.value,
+                                        loss=actual_loss, exit_price=self.stop_loss,
+                                        pips=budget.pips_from_diff(abs(self.entry_price - self.stop_loss)),
+                                        lot_size=self.entry_lot, bars_evaluated=len(evaluation_bars),
+                                        fetch_attempts=fetch_attempts)
+
+                    # Initial Take Profit hit (price going up)
+                    if bar.high >= self.initial_take_profit and not buy_tp_triggered:
+                        buy_tp_triggered = True
+                        self.entry_lot = self.entry_lot / 2
+                        actual_gain = budget.calculate_gain_loss(
+                            self.symbol, self.entry_price, self.initial_take_profit,
+                            self.entry_lot, "BUY"
+                        )
+
+                        self.gain += actual_gain
+                    
                 if self.is_completed:
-                    self.commission = self.entry_lot * commission_value
-                    self.gain -= self.commission
+                    if buy_tp_triggered or sell_tp_triggered:
+                        self.entry_lot = self.entry_lot * 2  # Restore original lot size for reporting
                     break
 
             # If we've processed all current bars without an outcome, try to fetch more
@@ -296,137 +329,6 @@ class Signal:
         log_signal_event("signal_remains_pending", self.symbol, self.action.value,
                        total_bars_processed=len([bar for bar in evaluation_bars if bar.timestamp > self.timestamp]),
                        total_fetch_attempts=fetch_attempts)
-
-    def online_order_manager(self, bar, budget):
-        risk_manager = settings.get("strategies.two_hunters.flags.use_risk_manager")
-        use_online_commission_manager = settings.get("strategies.two_hunters.flags.use_online_commission_manager")
-        use_offline_commission_manager = settings.get("strategies.two_hunters.flags.use_offline_commission_manager")
-        commission_diff = 0 #budget.calculate_commission_diff()
-        ratio_amount = round(abs(self.initial_entry_price - self.initial_stop_loss), 5)
-
-        if risk_manager and bar is not None:
-            # Risk-free management setup
-            risk_free_1r_applied = False
-            risk_free_2r_applied = False
-            risk_free_3r_applied = False
-
-            if self.action == SignalAction.SELL:
-
-                # Cover Commission amount
-                if not risk_free_1r_applied and bar.low <= self.initial_entry_price - commission_diff:
-                    new_sl = self.initial_stop_loss - commission_diff
-
-                    if self.stop_loss > new_sl:
-                        self.adjust_stop_loss(new_sl, "Reached commission amount")
-
-                # 1R favorable movement (price going down)
-                if not risk_free_1r_applied and bar.low <= self.initial_entry_price - ratio_amount:
-                    new_sl = (self.initial_stop_loss - ratio_amount / 2) - commission_diff
-
-                    if self.stop_loss > new_sl:
-                        # self.adjust_stop_loss(new_sl, "1R_favorable")
-                        risk_free_1r_applied = True
-                
-                # 2R breakeven
-                if not risk_free_2r_applied and bar.low <= round(self.initial_entry_price - 2 * ratio_amount, 5):
-                    new_sl = self.initial_entry_price - commission_diff
-
-                    if self.stop_loss > new_sl:
-                        self.adjust_stop_loss(new_sl, "2R_breakeven")
-                        risk_free_2r_applied = True
-                
-                # Near 3R lock
-                if abs(bar.low - self.initial_take_profit) <= 0.10*ratio_amount and not risk_free_3r_applied:
-                    new_sl = self.initial_entry_price - 0.90*(3*ratio_amount) - commission_diff
-                    new_tp = bar.low - 0.25*ratio_amount - commission_diff
-                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss > new_sl else self.stop_loss
-                    risk_free_3r_applied = True
-
-                # Post 3R movement
-                if abs(bar.low - self.take_profit) <= 0.10*ratio_amount and risk_free_3r_applied:
-                    new_sl = bar.high + 0.10*ratio_amount - commission_diff
-                    new_tp = bar.low - 0.25*ratio_amount - commission_diff
-                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "Post 3R movement") if self.stop_loss > new_sl else self.stop_loss
-
-            elif self.action == SignalAction.BUY:
-
-                # Cover Commission amount
-                if not risk_free_1r_applied and bar.high >= self.initial_entry_price + commission_diff:
-                    new_sl = self.initial_stop_loss + commission_diff
-
-                    if self.stop_loss < new_sl:
-                        self.adjust_stop_loss(new_sl, "Reached commission amount")
-
-                # 1R favorable movement (price going up)
-                if not risk_free_1r_applied and bar.high >= self.initial_entry_price + ratio_amount:
-                    new_sl = (self.initial_stop_loss + ratio_amount / 2) + commission_diff
-                        
-                    if self.stop_loss <= new_sl:
-                        self.adjust_stop_loss(new_sl, "1R_favorable") 
-                        risk_free_1r_applied = True
-                
-                # 2R breakeven
-                if not risk_free_2r_applied and bar.high >= self.initial_entry_price + 2 * ratio_amount:
-                    new_sl = self.initial_entry_price + commission_diff
-
-                    if self.stop_loss <= new_sl:
-                        self.adjust_stop_loss(new_sl, "2R_breakeven")
-                        risk_free_2r_applied = True
-
-                # Near 3R lock
-                if abs(bar.high - self.take_profit) <= 0.10*ratio_amount:
-                    new_sl = self.initial_entry_price + 0.95*(3*ratio_amount) + commission_diff
-                    new_tp = bar.high + 0.25*ratio_amount + commission_diff
-                    self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
-                    risk_free_3r_applied = True
-
-                # Post 3R movement
-                if abs(bar.high - self.take_profit) <= 0.10*ratio_amount and not risk_free_3r_applied:
-                    new_sl = bar.low - 0.10*ratio_amount + commission_diff
-                    new_tp = bar.high + 0.25*ratio_amount + commission_diff
-                    self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
-
-        elif use_online_commission_manager and bar is not None:
-            # Cover Commission amount
-            if self.action == SignalAction.SELL:
-                if bar.low <= self.initial_entry_price - commission_diff*2:
-                    new_sl = self.initial_stop_loss - commission_diff
-                    new_tp = self.initial_take_profit - commission_diff
-                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "Covered commission amount") if self.stop_loss > new_sl else self.stop_loss
-
-            # Cover Commission amount
-            elif self.action == SignalAction.BUY:
-                if bar.high >= self.initial_entry_price + commission_diff*2:
-                    new_sl = self.initial_stop_loss + commission_diff
-                    new_tp = self.initial_take_profit + commission_diff
-                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "Covered commission amount") if self.stop_loss < new_sl else self.stop_loss
-
-        elif use_offline_commission_manager and bar is not None:
-            # Cover Commission amount
-            commission_per_lot = settings.get("trading.commission")
-            commission_amount = budget.lots_from_diff(self.symbol, abs(self.initial_entry_price - self.initial_stop_loss)) * commission_per_lot
-            diff = (3*commission_amount / budget.calculate_pip_value(self.symbol)) * budget.pip_size
-
-            if self.action == SignalAction.SELL:
-                if abs(bar.low - self.initial_take_profit) <= 0.50*ratio_amount:
-                    new_sl = self.initial_entry_price - 0.95*(3*ratio_amount)
-                    new_tp = self.initial_take_profit - diff
-                    self.take_profit = new_tp if new_tp < self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "near_tp_commission_adjustment") if self.stop_loss > new_sl else self.stop_loss
-
-            # Cover Commission amount
-            elif self.action == SignalAction.BUY:
-                if abs(bar.high - self.initial_take_profit) <= 0.10*ratio_amount:
-                    new_sl = self.initial_entry_price + 0.95*(3*ratio_amount) + commission_diff
-                    new_tp = self.initial_take_profit + diff
-                    self.take_profit = new_tp if new_tp > self.take_profit else self.take_profit
-                    self.adjust_stop_loss(new_sl, "near_tp_lock") if self.stop_loss < new_sl else self.stop_loss
 
 
     # BINARY OPTION ANALYSIS (Preserved)
@@ -505,8 +407,11 @@ class Signal:
             "is_complete": self.is_completed,
             "is_pending": self.is_pending,
             "risk_free_activated": True if self.sl_adjusted_count > 0 else False,
+
+            "is_order": self.is_order
         }
 
+    @classmethod
     def from_dict(cls, data: dict) -> 'Signal':
         """
         Create Signal instance from dictionary representation.
@@ -549,14 +454,14 @@ class Signal:
         signal.exit_pips = float(data.get('exit_pips')) if data.get('exit_pips') else None
         signal.exit_price = float(data.get('exit_price')) if data.get('exit_price') else None
         signal.commission = float(data.get('commission')) if data.get('commission') else None
-        signal.ticket = int(data.get('ticket')) if data.get('ticket') else None
         
         # Restore flags
         signal.trend = data.get('trend')
-        signal.fake_choch = data.get('fake_choch')
+        signal.fake_choch = data.get('fake_CHoCH')
         signal.time_flag = data.get('time_flag')
         signal.used_flag = data.get('used_flag', False)
         signal.sl_adjusted_count = int(data.get('sl_adjusted_count', 0))
+        signal.is_order = data.get('is_order', False)
         
         return signal
     

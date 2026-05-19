@@ -42,6 +42,7 @@ def two_hunters_cli(ctx, config, verbose, quiet):
     if not quiet:
         click.echo(f"{settings.system_name} v{settings.system_version}")
 
+
 @two_hunters_cli.command()
 @click.option('--symbol', '-s', multiple=True, 
               help='Trading symbol (e.g., EURUSD, GBPUSD).')
@@ -181,287 +182,168 @@ def backtest(ctx, symbol, start_date, end_date, output_dir, no_signals, no_mbox,
 
 
 @two_hunters_cli.command()
-@click.option('--symbol', '-s', multiple=True, 
-              help='Trading symbol e.g., EURUSD, GBPUSD. If not provided, uses symbols from config.')
-@click.option('--risk', '-r', type=float, 
-              help='Risk percent to risk. If not provided, uses default from config.')
-@click.option('--max-concurrent', '-mc', type=int, default=5, 
-              help='Maximum concurrent symbols trading (default: 5).')
-@click.option('--check-interval', '-ci', type=int, default=5, 
-              help='Bar check interval in seconds (default: 5).')
-@click.option('--enable-monitoring', '-m', is_flag=True, 
-              help='Enable real-time monitoring dashboard.')
 @click.pass_context
-def live(ctx, symbol, risk, max_concurrent, check_interval, enable_monitoring):
-    """
-    Start live trading with the Two Hunters strategy across multiple symbols.
-    
-    Key Features:
-    • Multi-symbol concurrent trading with thread pool management
-    • Automatic account balance sync from MT5 on startup
-    • Daily trading loop (MBox end to Main session end)
-    • Health monitoring with configurable check intervals
-    • Graceful error recovery and thread management
-    • Signal persistence with daily reset to prevent over-trading
-    
-    Examples:
-        \b
-        # Single symbol with default risk
-        dio two-hunters live --symbol EURUSD.
-        
-        \b
-        # Multiple symbols with custom risk
-        dio two-hunters live -s EURUSD. -s GBPUSD. --risk 0.02
-        
-        \b
-        # All configured symbols
-        dio two-hunters live --risk 0.015 --max-concurrent 3
-    """
-    import sys
+def live(ctx):
+    import json
     import time
     import threading
 
-    from src.core.models.budget import Budget
-    from src.strategies.two_hunters import TwoHunters
-    from src.core.execution.mt5_connection import MT5Connection
-    from src.core.data.fetcher import DataFetcher
+    from datetime import datetime, timedelta, timezone
+
     from config.settings import settings
-    from datetime import datetime, timedelta
+    from src.core.models.budget import Budget
+    from src.core.execution.mt5_connection import MT5Connection
+    from src.indicators.fvg_detector import FVGDetector
+    from src.strategies.two_hunters import TwoHunters
+    from src.core.utils.logger import TradingLogger
 
-    logger = TradingLogger.get_main_logger()
-    fetcher = DataFetcher()
+    log = TradingLogger.get_main_logger()
 
-    # Resolve symbols
-    symbols = list(symbol) if symbol else settings.get('trading.symbols', ['EURUSD.', 'GBPUSD.'])
-    
-    # Handle risk configuration
-    risk = risk or settings.get('account.default_risk_percent', 0.01)
-    
-    # Validate risk
-    if not (0 < risk <= 0.1):
-        click.echo(f"ERROR: Risk must be between 0.001 and 0.1, got {risk}", err=True)
-        sys.exit(1)
-    
-    if not ctx.obj.get('quiet'):
-        click.echo(f"\n{'='*70}")
-        click.echo(f"{'DIO LIVE TRADING - TWO HUNTERS STRATEGY':^70}")
-        click.echo(f"{'='*70}\n")
-    
-    # Initialize MT5 connection
-    mt5_connection = MT5Connection()
-    
-    if not mt5_connection.initialize_connection():
-        click.echo("ERROR: Failed to initialize MT5 connection", err=True)
-        logger.error("MT5 connection initialization failed")
-        sys.exit(1)
-    
-    # Get account info
-    account_info = mt5_connection.get_account_info()
-    
-    if account_info and hasattr(account_info, 'balance'):
-        balance = float(account_info.balance)
-        settings.set('account.balance', balance)
-        if not ctx.obj.get('quiet'):
-            click.echo(f"✓ Account balance: ${balance:,.2f}")
-    else:
-        balance = settings.get('account.balance', 10000.0)
-        if not ctx.obj.get('quiet'):
-            click.echo(f"⚠ Using fallback balance: ${balance:,.2f}")
-    
-    if not ctx.obj.get('quiet'):
-        click.echo(f"\nConfiguration:")
-        click.echo(f"  Symbols: {', '.join(symbols)}")
-        click.echo(f"  Risk per trade: {risk*100:.2f}%")
-        click.echo(f"  Max concurrent: {max_concurrent}")
-        click.echo(f"  Check interval: {check_interval}s")
-        click.echo(f"\n{'─'*70}")
-        click.echo(f"Press Ctrl+C to stop live trading\n")
-        click.echo(f"{'─'*70}\n")
-    
-    # Create budget
-    budget = Budget(initial_balance=balance, initial_risk_percent=risk)
-    
-    # Initialize strategy instances
-    two_hunters_instances = {}
-    active_threads = {}
-    stop_event = threading.Event()
-    thread_lock = threading.Lock()
-    
-    # Get session times
-    mbox_start_str = settings.get('strategies.two_hunters.mbox_time.start', '04:30')
-    mbox_end_str = settings.get('strategies.two_hunters.mbox_time.end', '12:29')
-    session_end_str = settings.get('strategies.two_hunters.sessions.main.end', '22:00')
-    
-    try:
-        mbox_start = datetime.strptime(mbox_start_str, '%H:%M').time()
-        mbox_end = datetime.strptime(mbox_end_str, '%H:%M').time()
-        session_end = datetime.strptime(session_end_str, '%H:%M').time()
-    except ValueError as e:
-        click.echo(f"ERROR: Invalid session times in config: {e}", err=True)
-        sys.exit(1)
-    
-    try:
-        # Main trading loop
-        while not stop_event.is_set():
+    BROKER_TZ = timezone(timedelta(hours=6, minutes=30))
+    symbols   = settings.symbols
+    risk      = settings.default_risk_percent
 
-            current_time = fetcher.get_latest_bars(symbols[0])[-1].timestamp if symbols else None
-            current_time_only = current_time.time() if current_time else None
-            
-            # Check if we're in trading window (MBox end to session end)
-            in_trading_window = (
-                current_time_only >= mbox_end and 
-                current_time_only <= session_end
+    running_workers    = {}
+    signals_file_lock  = threading.Lock()
+
+    # ──────────────────────────────────────────────────────────
+    # helpers
+    # ──────────────────────────────────────────────────────────
+
+    def now():
+        return datetime.now(BROKER_TZ)
+
+    def is_weekend(dt):
+        return dt.weekday() >= 5
+
+    def session_start_dt(dt):
+        return datetime.combine(
+            dt.date(),
+            datetime.strptime(
+                settings.get("strategies.two_hunters.sessions.main.start"),
+                "%H:%M"
+            ).time(),
+            tzinfo=BROKER_TZ
+        )
+
+    def session_end_dt(dt):
+        return datetime.combine(
+            dt.date(),
+            datetime.strptime(
+                settings.get("strategies.two_hunters.sessions.main.end"),
+                "%H:%M"
+            ).time(),
+            tzinfo=BROKER_TZ
+        )
+
+    def wait_until_market_open():
+        while True:
+            current = now()
+            if is_weekend(current):
+                log.info("Weekend – sleeping 60 min...")
+                time.sleep(3600)
+                continue
+            start = session_start_dt(current)
+            if current >= start:
+                return
+            secs = max(int((start - current).total_seconds()), 1)
+            log.info(f"Waiting for session open in {secs}s...")
+            time.sleep(min(secs, 1800))
+
+    def stop_all_workers():
+        for symbol, w in list(running_workers.items()):
+            log.info(f"Stopping worker {symbol}")
+            w["stop_event"].set()
+            w["thread"].join(timeout=10)
+        running_workers.clear()
+
+    # ──────────────────────────────────────────────────────────
+    # MAIN LOOP  – runs forever, one trading day per iteration
+    # ──────────────────────────────────────────────────────────
+
+    while True:
+
+        wait_until_market_open()
+
+        current_date = now().date()
+        log.info(f"=== Starting trading day {current_date} ===")
+
+        # ── MT5 connection ────────────────────────────────────
+        mt5_conn = MT5Connection()
+        if not mt5_conn.initialize_connection():
+            log.error("MT5 connection failed – retrying in 10s")
+            time.sleep(10)
+            continue
+
+        account_info = mt5_conn.get_account_info()
+        if account_info is None:
+            log.error("Could not get account info – retrying in 10s")
+            time.sleep(10)
+            continue
+
+        balance = account_info.balance
+        log.info(f"Account balance: ${balance:.0f}")
+
+        budget = Budget(initial_balance=balance, initial_risk_percent=risk)
+
+        # ── preload FVGs ──────────────────────────────────────
+        try:
+            log.info("Loading FVG cache...")
+            detector = FVGDetector(symbols=symbols, timeframes=["M15", "H8"])
+            detector.load_fvgs_from_cache()
+            log.info("FVGs loaded")
+        except Exception as e:
+            log.error(f"FVG load failed: {e}")
+
+        # ── kill any leftover workers from the previous day ───
+        stop_all_workers()
+
+        # ── launch one worker thread per symbol ───────────────
+        for symbol in symbols:
+            budget.calculate_lot_size(symbol)
+            budget.calculate_pip_size(symbol)
+
+            strategy = TwoHunters(budget=budget)
+            strategy.symbol = symbol
+
+            stop_event = threading.Event()
+
+            thread = threading.Thread(
+                target=strategy.live_worker,
+                args=(stop_event, mt5_conn, signals_file_lock),
+                daemon=True
             )
-            
-            if in_trading_window:
-                with thread_lock:
-                    # Initialize strategy instances if needed
-                    for sym in symbols:
-                        if sym not in two_hunters_instances:
-                            try:
-                                two_hunters_instances[sym] = TwoHunters(
-                                    budget=budget,
-                                    name=f"TwoHunters-{sym}"
-                                )
-                                two_hunters_instances[sym].symbol = sym
-                                if not ctx.obj.get('quiet'):
-                                    click.echo(
-                                        f"[{current_time.strftime('%H:%M:%S')}] "
-                                        f"Initialized {sym}"
-                                    )
-                            except Exception as e:
-                                logger.error(f"Failed to initialize strategy for {sym}: {e}")
-                                continue
-                        
-                        # Start thread if not already running
-                        if sym not in active_threads or not active_threads[sym].is_alive():
-                            thread = threading.Thread(
-                                target=_run_symbol_live_trading,
-                                args=(
-                                    two_hunters_instances[sym],
-                                    stop_event,
-                                    ctx.obj.get('quiet', False),
-                                    check_interval,
-                                    ctx.obj.get('verbose', False)
-                                ),
-                                name=f"TwoHunters-{sym}",
-                                daemon=False
-                            )
-                            active_threads[sym] = thread
-                            thread.start()
-                            if not ctx.obj.get('quiet'):
-                                click.echo(
-                                    f"[{current_time.strftime('%H:%M:%S')}] "
-                                    f"Started trading thread for {sym}"
-                                )
-                
-                # Wait before next check
-                time.sleep(min(check_interval, 5))
-            
-            else:
-                # Outside trading window
-                mbox_end_datetime = datetime.combine(
-                    current_time.date(),
-                    mbox_end
-                )
-                
-                # Case 1: mbox_end hasn't arrived yet today - wait for it
-                if mbox_end_datetime > current_time:
-                    wait_seconds = (mbox_end_datetime - current_time).total_seconds()
-                # Case 2: session_end has passed - wait for tomorrow's mbox_end
-                else:
-                    mbox_end_datetime += timedelta(days=1)
-                    wait_seconds = (mbox_end_datetime - current_time).total_seconds()                
-                
-                # Show most recent orders placed
-                recent_orders = mt5_connection.get_today_signals()  # Reuse existing method for today's completed signals
-                if recent_orders and not ctx.obj.get('quiet'):
-                    click.echo(f"[{current_time.strftime('%H:%M:%S')}] Recent orders today ({len(recent_orders)}):")
-                    for sig in sorted(recent_orders, key=lambda s: s.timestamp, reverse=True)[:1]:  # Top 1 newest
-                        outcome = sig.outcome if sig.outcome else "PENDING"
-                        click.echo(f"  {sig.symbol} {sig.action.value} @ {sig.entry_price:.5f} "
-                                f"(lot: {sig.entry_lot:.2f}, gain: ${sig.gain:.2f}, "
-                                f"outcome: {outcome}, time: {sig.timestamp.strftime('%H:%M')})")
-                    click.echo("")  # Spacer
-                
-                if not ctx.obj.get('quiet'):
-                    hours = int(wait_seconds // 3600)
-                    minutes = int((wait_seconds % 3600) // 60)
-                    click.echo(
-                        f"[{current_time.strftime('%H:%M:%S')}] "
-                        f"Outside trading window. Next in {hours}h {minutes}m"
-                    )
-                
-                # Sleep (until next trading window - but wake up 5 minutes before to recheck)
-                if wait_seconds > 300:
-                    time.sleep(wait_seconds - 300)
-                else:
-                    time.sleep(60)
+            thread.start()
 
-    
-    except KeyboardInterrupt:
-        if not ctx.obj.get('quiet'):
-            click.echo("\n\n[!] Shutting down live trading...")
-        stop_event.set()
-    
-    except Exception as e:
-        import traceback
-        tb = traceback.extract_tb(sys.exc_info()[2])[-1]
-        click.echo(f"\nERROR: {e}\n  File {tb.filename}, line {tb.lineno}", err=True)
-        logger.error(f"Unexpected error in live trading: {e}", exc_info=True)
-        if ctx.obj.get('verbose'):
-            traceback.print_exc()
-        sys.exit(1)
-    
-    finally:
-        if not ctx.obj.get('quiet'):
-            click.echo("\nWaiting for trading threads to finish...")
-        
-        # Wait for all threads
-        for sym in list(active_threads.keys()):
-            thread = active_threads[sym]
-            if thread.is_alive():
-                thread.join(timeout=10)
-                if not ctx.obj.get('quiet'):
-                    click.echo(f"  ✓ {sym} thread closed")
-        
-        # Cleanup
-        mt5_connection.shutdown_connection()
-        logger.info("Live trading session ended")
-        
-        if not ctx.obj.get('quiet'):
-            click.echo("\n✓ Live trading stopped gracefully")
+            running_workers[symbol] = {
+                "thread": thread,
+                "stop_event": stop_event,
+                "date": current_date,
+            }
+            log.info(f"Worker started: {symbol}")
 
+        # ── wait until session end ────────────────────────────
+        while True:
+            current = now()
 
-def _run_symbol_live_trading(
-    two_hunters,
-    stop_event,
-    quiet=False,
-    check_interval=5,
-    verbose=False
-):
-    """
-    Run live trading for a single symbol in a thread.
-    This function is designed to be run in a separate thread for each symbol.
-    It will continuously check for new bars and generate signals until the
-    stop_event is set.
-    """
-    logger = TradingLogger.get_trading_logger()
-    
-    try:
-        two_hunters.all_bars = []  # Initialize bars list for the symbol
-        two_hunters.live(
-            check_interval=check_interval,
-            stop_event=stop_event
-        )
-    except Exception as e:
-        logger.error(
-            f"Error in live trading thread for {two_hunters.symbol}: {e}",
-            exc_info=True
-        )
-        if verbose:
-            import traceback
-            traceback.print_exc()
+            if is_weekend(current):
+                log.info("Weekend started mid-day")
+                break
 
-if __name__ == '__main__':
-    two_hunters_cli()
+            if current >= session_end_dt(current):
+                log.info("Session ended")
+                break
+
+            # also break if the calendar date rolled over
+            if current.date() != current_date:
+                log.info("New calendar day - restarting loop")
+                break
+
+            time.sleep(30)
+
+        stop_all_workers()
+        mt5_conn.shutdown_connection()
+        log.info(f"=== Trading day {current_date} complete ===")
+
+        # brief pause before the next wait_until_market_open check
+        time.sleep(60)

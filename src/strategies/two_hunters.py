@@ -1,7 +1,8 @@
 import threading
 import json
 import time as goodtimes
-from datetime import datetime, timedelta, time, date
+import os
+from datetime import datetime, timedelta, time, date, timezone
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from collections import defaultdict
@@ -205,14 +206,6 @@ class TwoHunters():
         # Fair Value Gap (FVG) logic
         min_fvg, max_fvg = self.fvg_range
         
-        # def dynamic_fvg_scale(fvg_size_pips: float) -> float:
-        #     """Calculate dynamic scale based on FVG size"""
-        #     if fvg_size_pips < min_fvg:
-        #         return 1.0
-        #     elif fvg_size_pips >= max_fvg:
-        #         return 0.5
-        #     return 1.0 - (fvg_size_pips * 0.5) / max_fvg
-
         def dynamic_fvg_scale(fvg_size_pips: float) -> float:
             """Calculate dynamic scale based on FVG size.
             
@@ -220,14 +213,14 @@ class TwoHunters():
             Returns 0.5 when closer to min_fvg, 0.3 when closer to max_fvg.
             """
             if min_fvg <= fvg_size_pips <= max_fvg:
-                # Linear interpolation from (min_fvg -> 0.5) to (max_fvg -> 0.3)
+                # Linear interpolation from (min_fvg -> 0.6) to (max_fvg -> 0.4)
                 t = (fvg_size_pips - min_fvg) / (max_fvg - min_fvg)  # t ranges 0 to 1
-                return 0.5 - (t * 0.1)  # 0.5 - t*0.1 gives 0.5 to 0.4
+                return 0.6 - (t * 0.2)
             
             # Handle edge cases
-            if fvg_size_pips < min_fvg:
+            if fvg_size_pips <= min_fvg:
                 return 1.0  # Below min, return max scale
-            if fvg_size_pips > max_fvg:
+            if fvg_size_pips >= max_fvg:
                 return 0.4  # Above max, return min scale
 
         scale = 1.0
@@ -248,7 +241,8 @@ class TwoHunters():
             stop_loss = self.ratios["stop_loss"] * (extrema + diff)
             
             if scale == 1.0: take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss)
-            else: take_profit = signal_bar.close - self.ratios["take_profit"] * abs(signal_bar.close - stop_loss)
+            # else: take_profit = signal_bar.close - self.ratios["take_profit"] * abs(signal_bar.close - stop_loss)
+            else: take_profit = entry_price - self.ratios["take_profit"] * abs(entry_price - stop_loss)
 
         elif action == SignalAction.BUY:
             # Check for bullish FVG
@@ -266,10 +260,11 @@ class TwoHunters():
             stop_loss = self.ratios["stop_loss"] * (extrema - diff)
 
             if scale == 1.0: take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss)
-            else: take_profit = signal_bar.close + self.ratios["take_profit"] * abs(signal_bar.close - stop_loss)
+            # else: take_profit = signal_bar.close + self.ratios["take_profit"] * abs(signal_bar.close - stop_loss)
+            else: take_profit = entry_price + self.ratios["take_profit"] * abs(entry_price - stop_loss)
 
         self.logger.debug(f"Entry calculation: EP={entry_price:.5f}, SL={stop_loss:.5f}, TP={take_profit:.5f}")
-        return entry_price, stop_loss, take_profit
+        return entry_price, stop_loss, take_profit, scale < 1.0
     
     def _get_surrounding_bars(self, bar: Bar) -> Tuple[Optional[Bar], Optional[Bar]]:
         """Get bars immediately before and after the given bar"""
@@ -339,7 +334,7 @@ class TwoHunters():
         if not mbox_bars or len(session_bars) < 5:
             self.logger.debug(f"Insufficient bars: MBox={len(mbox_bars)}, Session={len(session_bars)}")
             return None
-        
+
         # Analyze MBox for market bias
         mbox_result = self.mbox_result if self.mbox_result else self.mbox_analyzer.calculate(mbox_bars)
         self.breakout_engine.symbol = self.symbol
@@ -353,22 +348,11 @@ class TwoHunters():
         
         elif True:
             self.breakout_engine.type = BreakoutType.CUSTOM
-            
-            # Get current day
-            current_day = session_bars[0].timestamp
 
-            # london_results, newyork_results = self.get_london_newyork_results(current_day=current_day, symbol=failed_signal.symbol, look_back_days=7)
-            # london_results, newyork_results = None, None
-
-            outcome_bar = next((bar for bar in session_bars if bar.timestamp == failed_signal.outcome_timestamp), None)
             bars_after_failed = [bar for bar in session_bars if bar.timestamp >= failed_signal.outcome_timestamp]
-
-            # fvg_results = self.fvg_detector.get_nearby_active_fvgs(bar=outcome_bar, symbol=failed_signal.symbol, pip_size=50.0)
-
-            extrema, signal_bar, action, hunter_bar, custom_sl_tp = self.breakout_engine.breakout(
-                session_bars=bars_after_failed, mbox_result=mbox_result, 
-                london_results={}, newyork_results={}, 
-                fvg_results=outcome_bar, failed_signal=failed_signal
+                        
+            extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.breakout(
+                session_bars=bars_after_failed, failed_signal=failed_signal
             )
         
         else:
@@ -390,7 +374,7 @@ class TwoHunters():
         action_enum = SignalAction.SELL if action == "SELL" else SignalAction.BUY
 
         # Calculate entry details
-        entry_price, stop_loss, take_profit = self.calculate_entry_details(
+        entry_price, stop_loss, take_profit, _is_order = self.calculate_entry_details(
             action_enum, signal_bar, extrema
         )
         
@@ -402,7 +386,7 @@ class TwoHunters():
         
         if not signal:
             return None
-        
+
         # Set strategy flags
         if failed_signal is None:
             signal.trend = mbox_result.get("trend", False)
@@ -417,7 +401,56 @@ class TwoHunters():
         self.budget.update_risk_percent(signal)
         signal.stop_loss_pips = self.budget.pips_from_diff(abs(signal.entry_price - signal.stop_loss))
         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+        signal.is_order = _is_order
 
+        # check if there is fvg close by
+        if self.breakout_engine.type == BreakoutType.CUSTOM:
+            _tp_moved = False
+            lookahead_pips = 5000
+            fvgs = self.fvg_detector.get_nearby_active_fvgs(bar=signal_bar, symbol=self.symbol, pip_size=lookahead_pips)
+
+            clean_fvgs = []
+            for tf in fvgs:
+                for fvg in fvgs[tf]:
+                    if ((tf == "london" or tf == "newyork") and 
+                        datetime.fromisoformat(fvg["detection_time"]) > datetime.combine(signal.timestamp.date(), self.mbox_time[1])):
+                        continue
+                    clean_fvgs.append(fvg)
+
+            if clean_fvgs:
+                bearishes = []
+                bullishes = []
+                for fvg in clean_fvgs:
+                    if fvg['type'] == "bearish": bearishes.append(fvg['low'])
+                    if fvg['type'] == "bullish": bullishes.append(fvg['high'])
+
+            bearishes.sort(reverse=True)
+            bullishes.sort()
+
+            if action == "SELL":
+                for bullish in bullishes:
+                    if self.budget.pips_from_diff(bullish - signal.entry_price) / signal.stop_loss_pips >= 5:
+                        continue
+
+                    if self.budget.pips_from_diff(bullish - signal.entry_price) / signal.stop_loss_pips < signal.take_profit_pips / signal.stop_loss_pips:
+                        continue
+
+                    signal.take_profit = bullish
+                    _tp_moved = True
+                    break
+
+            if action == "BUY":
+                for bearish in bearishes:
+                    if self.budget.pips_from_diff(bearish - signal.entry_price) / signal.stop_loss_pips >= 5:
+                        continue
+
+                    if self.budget.pips_from_diff(bearish - signal.entry_price) / signal.stop_loss_pips < signal.take_profit_pips / signal.stop_loss_pips:
+                        continue
+
+                    signal.take_profit = bearish
+                    _tp_moved = True
+                    break
+        
         # Commission amount
         commission = settings.get("trading.commission")
         use_offline_commission_manager = settings.get("strategies.two_hunters.flags.use_offline_commission_manager")
@@ -462,24 +495,22 @@ class TwoHunters():
                     signal.take_profit = _2r_top
                     signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
 
-        # if self.breakout_engine.type == BreakoutType.CUSTOM:
-        #     if custom_sl_tp["stop_loss"]:
-        #         signal.initial_stop_loss = custom_sl_tp["stop_loss"]
-        #         signal.stop_loss = custom_sl_tp["stop_loss"]
-            
-        #     if custom_sl_tp["take_profit"]:
-        #         signal.initial_take_profit = custom_sl_tp["take_profit"]
-        #         signal.take_profit = custom_sl_tp["take_profit"]
+        _r = abs(signal.entry_price - signal.stop_loss)
+        
+        signal.entry_lot = self.budget.lots_from_diff(signal.symbol, _r)
+        signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
+        signal.stop_loss_pips = self.budget.pips_from_diff(_r)
 
+        commission_diff = 0
+        # commission_amount = signal.entry_lot * commission
+        # commission_diff = self.budget.diff_from_pips(commission_amount / 10)
 
-            _r = abs(signal.entry_price - signal.stop_loss)
-            # if signal.is_sell: signal.initial_take_profit, signal.take_profit = signal.entry_price - 6*_r, signal.entry_price - 6*_r
-            # if signal.is_buy: signal.initial_take_profit, signal.take_profit = signal.entry_price + 6*_r, signal.entry_price + 6*_r
-            
-            signal.entry_lot = self.budget.lots_from_diff(signal.symbol, _r)
-            signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
-            signal.stop_loss_pips = self.budget.pips_from_diff(_r)
+        # while commission_diff / _r >= 0.3:
+        #     commission_diff /= 2
 
+        if self.breakout_engine.type == BreakoutType.CUSTOM:
+            if action == "BUY":  signal.initial_take_profit = signal.entry_price + (abs(signal.entry_price - signal.stop_loss) * 1.0) + commission_diff
+            if action == "SELL": signal.initial_take_profit = signal.entry_price - (abs(signal.entry_price - signal.stop_loss) * 1.0) - commission_diff
 
         # Log signal generation
         log_signal_event(
@@ -493,78 +524,6 @@ class TwoHunters():
         self.signal_counter[self.symbol] += 1
 
         return signal
-
-    def get_london_newyork_results(
-        self,
-        current_day: datetime,
-        symbol: str,
-        look_back_days: int = 1
-    ) -> tuple[dict | None, dict | None]:
-        """
-        Extract London and New York session highs/lows from the previous trading day.
-        Skips weekends: Monday uses Friday data, normal days use previous day.
-        
-        Args:
-            current_day: Current trading day (from session_bars[0].timestamp)
-            symbol: Trading symbol
-            
-        Returns:
-            tuple of dicts with updated max_val and min_val for London and New York sessions
-        """
-        fetcher = DataFetcher()
-        
-        # Get London and New York times from YAML config
-        london_config = settings.get("strategies.two_hunters.sessions.london", {})
-        newyork_config = settings.get("strategies.two_hunters.sessions.newyork", {})
-        
-        london_start = datetime.strptime(london_config.get("start"), "%H:%M").time()
-        london_end = datetime.strptime(london_config.get("end"), "%H:%M").time()
-        newyork_start = datetime.strptime(newyork_config.get("start"), "%H:%M").time()
-        newyork_end = datetime.strptime(newyork_config.get("end"), "%H:%M").time()
-        
-        london_results:  List[dict] = []
-        newyork_results: List[dict] = []
-        
-        for _ in range(look_back_days):
-            if current_day.weekday() == 0:  # Monday -> Friday
-                previous_day = current_day - timedelta(days=3)
-            elif current_day.weekday() == 6:  # Sunday -> Friday
-                previous_day = current_day - timedelta(days=2)
-            else:  # Other days -> previous day
-                previous_day = current_day - timedelta(days=1)
-
-            london_bars = fetcher.fetch_bars_from_mt5(
-                start_dt = datetime.combine(previous_day.date(), london_start),
-                end_dt   = datetime.combine(previous_day.date(), london_end),
-                symbol   = symbol
-                )
-
-            newyork_bars = fetcher.fetch_bars_from_mt5(
-                start_dt = datetime.combine(previous_day.date(), newyork_start),
-                end_dt   = datetime.combine((previous_day+timedelta(days=1)).date(), newyork_end),
-                symbol   = symbol
-                )
-            
-            if london_bars and newyork_bars:
-
-                london_results.append({
-                    "timestamp": previous_day.isoformat(),
-                    "max_val": max(bar.high for bar in london_bars),
-                    "min_val": min(bar.low for bar in london_bars)
-                })
-
-                newyork_results.append({
-                    "timestamp": previous_day.isoformat(),
-                    "max_val": max(bar.high for bar in newyork_bars),
-                    "min_val": min(bar.low for bar in newyork_bars)
-                })
-
-            else:
-                look_back_days+=1
-
-            current_day = previous_day
-
-        return london_results, newyork_results
 
     def backtest(
         self,
@@ -596,10 +555,10 @@ class TwoHunters():
         # self.fvg_detector.clear_cache()
         # self.fvg_detector.symbols = symbols
         # self.fvg_detector.timeframes = ["H8", "M15"]
-        # self.fvg_detector.detect(start_date - timedelta(days=20), end_date)  # TODO: move to config
+        # self.fvg_detector.detect(start_date - timedelta(days=60), end_date)  # TODO: move to config
         self.fvg_detector.load_fvgs_from_cache()
         click.echo(f"FVGs Detected.")
-
+        c = 0
         try:
             # Fetch historical data
             self.logger.info(f"Fetching data for {symbols} from {start_date} to {end_date}")
@@ -635,27 +594,28 @@ class TwoHunters():
                                 results[symbol].append(main_signal)
                                 signals.append(main_signal)
                                 if self.check_strategy_flags(main_signal):
-                                    # if not main_signal.time_flag:
                                     self.budget.apply_signal_gain(main_signal)
 
                                     self.logger.debug(f"Main signal completed: {main_signal.outcome.value}, "
                                                     f"Gain: {main_signal.gain}")
                                     
-                                if main_signal.outcome.value == 'loss':
-                                    recovery_signal = self.attempt_signal(current_date, failed_signal=main_signal)
-                                    
-                                    if recovery_signal:
-                                        recovery_signal.evaluate_signal(budget=self.budget)
-                                        if recovery_signal.is_completed:
-                                            results[symbol].append(recovery_signal)
-                                            signals.append(recovery_signal)
-                                            if self.check_strategy_flags(recovery_signal):
-                                                self.budget.apply_signal_gain(recovery_signal)
+                                recovery_signal = self.attempt_signal(current_date, failed_signal=main_signal)
+                                
+                                if recovery_signal:
+                                    recovery_signal.evaluate_signal(budget=self.budget)
+                                    if recovery_signal.is_completed:
+                                        results[symbol].append(recovery_signal)
+                                        signals.append(recovery_signal)
+                                        if self.check_strategy_flags(recovery_signal):
+                                            self.budget.apply_signal_gain(recovery_signal)
 
-                                                self.logger.debug(f"Recovery signal completed: "
-                                                                f"{recovery_signal.outcome.value}, "
-                                                                f"Gain: {recovery_signal.gain}")
+                                            self.logger.debug(f"Recovery signal completed: "
+                                                            f"{recovery_signal.outcome.value}, "
+                                                            f"Gain: {recovery_signal.gain}")
                         
+                                if main_signal.commission == abs(main_signal.gain):
+                                    c+=1
+
                 days_processed += 1
                 current_date += timedelta(days=1)
                 commission_loss = sum([s.commission for s in signals if not s.used_flag])
@@ -688,7 +648,7 @@ class TwoHunters():
                 args['display_range'] = 'daily'
                 
                 report_gen = ReportGenerator(report_dir)
-                report_path = report_gen.generate_reports(
+                report_gen.generate_reports(
                     symbols=symbols,
                     date_range=(start_date, end_date),
                     results=results,
@@ -708,3 +668,198 @@ class TwoHunters():
         except Exception as e:
             log_system_event("backtest_error", error=str(e))
             raise
+
+
+    def live_worker(self, stop_event: threading.Event, mt5_conn: MT5Connection, signals_file_lock: threading.Lock):
+
+            import json, time
+            from datetime import datetime, timedelta, timezone
+            from src.core.data.fetcher import DataFetcher
+            from src.core.models.signal import Signal, SignalType, SignalOutcome
+            from src.core.utils.logger import TradingLogger
+
+            logger    = TradingLogger.get_main_logger()
+            BROKER_TZ = timezone(timedelta(hours=6, minutes=30))
+            fetcher   = DataFetcher()
+
+            signals_dir  = settings.get("paths.signals")
+            signals_file = f"{signals_dir}/{datetime.now(BROKER_TZ).strftime('%Y-%m-%d')}.json"
+
+            # ── JSON helpers ──────────────────────────────────────────────
+
+            def _read_file():
+                """Read raw JSON from disk – always called inside the lock."""
+                try:
+                    with open(signals_file, "r") as f:
+                        return json.load(f)
+                except Exception:
+                    return {}
+
+            def load_signals():
+                with signals_file_lock:
+                    return _read_file()
+
+            def save_signal(signal):
+                with signals_file_lock:
+                    data = _read_file()           # read while already holding the lock
+                    existing = [
+                        s for s in data.get(self.symbol, [])
+                        if s.get("ticket") != signal.ticket
+                    ]
+                    existing.append(signal.to_dict())
+                    data[self.symbol] = existing
+                    with open(signals_file, "w") as f:
+                        json.dump(data, f, indent=2)
+
+            def signal_exists(signal):
+                """True if a signal with matching levels is already on disk."""
+                for s in load_signals().get(self.symbol, []):
+                    if (
+                        s["entry_price"] == signal.entry_price and
+                        s["stop_loss"]   == signal.stop_loss   and
+                        s["take_profit"] == signal.take_profit
+                    ):
+                        return True
+                return False
+
+            # ── bootstrap bars ────────────────────────────────────────────
+
+            self.all_bars = fetcher.get_latest_bars(self.symbol, count=800)
+            logger.info(f"{self.symbol} worker started | {len(self.all_bars)} bars loaded")
+
+            # ── restore today's signals from disk (restart guard) ─────────
+
+            active_main_signal     = None
+            active_recovery_signal = None
+
+            for s in load_signals().get(self.symbol, []):
+                sig = Signal.from_dict(s)
+                if sig.signal_type == SignalType.MAIN and active_main_signal is None:
+                    active_main_signal = sig
+                    logger.info(f"{self.symbol} restored main signal (ticket {sig.ticket})")
+                elif sig.signal_type == SignalType.RECOVERY and active_recovery_signal is None:
+                    active_recovery_signal = sig
+                    logger.info(f"{self.symbol} restored recovery signal (ticket {sig.ticket})")
+
+            # ── small helpers ─────────────────────────────────────────────
+
+            def fetch_and_append():
+                latest = fetcher.get_latest_bars(self.symbol, count=1)
+                if latest:
+                    bar = latest[-1]
+                    if bar.timestamp > self.all_bars[-1].timestamp:
+                        self.all_bars.append(bar)
+                        logger.info(f"{self.symbol} new bar {bar.timestamp}")
+
+            def place(signal):
+                """Place a signal unless it is already on disk, return it or None."""
+                if signal is None:
+                    return None
+                if signal_exists(signal):
+                    logger.info(f"{self.symbol} duplicate signal – skipping placement")
+                    return signal          # already placed before restart
+                placed = (
+                    mt5_conn.place_pending_order(signal)
+                    if signal.is_order
+                    else mt5_conn.place_market_order(signal)
+                )
+                if placed:
+                    save_signal(signal)
+                    return signal
+                return None
+
+            def print_signal_status(sig, label):
+                """Print a one-line live status for the active signal."""
+                order_data = mt5_conn.get_open_order(sig)
+                ts = datetime.now(BROKER_TZ).strftime("%H:%M:%S")
+                if order_data:
+                    profit_str = (
+                        f"  Profit: ${order_data['profit']:.2f}"
+                        if order_data.get("profit") is not None
+                        else "  (pending order)"
+                    )
+                    print(
+                        f"[{ts}] {self.symbol} {label} | "
+                        f"Lots={sig.entry_lot} | "
+                        f"{sig.action.value} @ {sig.entry_price:.5f} | "
+                        f"SL={sig.stop_loss_pips:.1f}  TP={sig.take_profit_pips:.1f}"
+                        f"{profit_str}"
+                    )
+
+            def monitor_loop(sig, label):
+                """
+                Block here, printing status every second, until the signal
+                closes or the stop_event fires.  Saves to disk each tick.
+                """
+                _r_one_triggered = False
+                while not stop_event.is_set():
+                    fetch_and_append()
+                    sig = mt5_conn.monitor_signal(sig)
+                    if label == "RECOVERY" and sig.gain >= sig.entry_lot * sig.stop_loss_pips and not _r_one_triggered:
+                        _r_one_triggered = True
+                        mt5_conn.update_order(sig, - sig.entry_lot / 2)
+                    save_signal(sig)
+                    print_signal_status(sig, label)
+                    if sig.is_completed:
+                        ts = datetime.now(BROKER_TZ).strftime("%H:%M:%S")
+                        print(
+                            f"[{ts}] {self.symbol} {label} CLOSED | "
+                            f"outcome={sig.outcome.value.upper()} | "
+                            f"gain=${sig.gain:.2f}"
+                        )
+                        return
+                    time.sleep(1)
+
+
+            # ── MAIN LOOP ─────────────────────────────────────────────────
+            while not stop_event.is_set():
+                try:
+                    fetch_and_append()
+
+                    # ── hunt for main signal ──────────────────────────────
+                    if active_main_signal is None:
+
+                        signal = self.attempt_signal(target_date=datetime.now(BROKER_TZ))
+
+                        if signal:
+                            active_main_signal = place(signal)
+                            if active_main_signal:
+                                logger.info(f"{self.symbol} main signal placed")
+
+                    # ── monitor main until it closes ──────────────────────
+                    if active_main_signal:
+
+                        monitor_loop(active_main_signal, label="MAIN")
+
+                        if active_main_signal.is_completed:
+
+                            rec = self.attempt_signal(
+                                target_date=datetime.now(BROKER_TZ),
+                                failed_signal=active_main_signal
+                            )
+
+                            active_recovery_signal = place(rec)
+                            
+                            if active_recovery_signal:
+                                logger.info(f"{self.symbol} recovery signal placed")
+
+
+                    # ── monitor recovery until it closes ──────────────────
+                    if active_recovery_signal:
+
+                        monitor_loop(active_recovery_signal, label="RECOVERY")
+
+                        if active_recovery_signal.is_completed:
+                            logger.info(
+                                f"{self.symbol} recovery completed: "
+                                f"{active_recovery_signal.outcome}"
+                            )
+
+                    time.sleep(1)
+
+                except Exception:
+                    import traceback
+                    logger.error(f"{self.symbol} worker error:\n{traceback.format_exc()}")
+                    time.sleep(5)
+
+            logger.info(f"{self.symbol} worker stopped")

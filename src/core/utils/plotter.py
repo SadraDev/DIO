@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional, Any, Tuple
-from datetime import datetime, timedelta, time, date
+from datetime import datetime, timedelta, time, date, timezone
+from collections import defaultdict
 import pandas as pd
 from pathlib import Path
 import json
@@ -258,7 +259,7 @@ class TradingPlotter:
             opacity = 0.3
             shapes = []
             counter = 1
-            self.logger.info(f"Loop start.")
+            # self.logger.info(f"Loop start.")
             for idx, row in df_15m.iterrows():
                 if round(len(bars) / 10)*counter == idx:
                     counter+=1
@@ -317,9 +318,9 @@ class TradingPlotter:
                     layer="below"
                 ))
 
-            self.logger.info(f"Loop end and Fig update start")
+            # self.logger.info(f"Loop end and Fig update start")
             fig.update_layout(shapes=list(fig.layout.shapes) + shapes)
-            self.logger.info(f"Fig update end")
+            # self.logger.info(f"Fig update end")
 
         except Exception as e:
             self.logger.error(f"Error adding 15M overlay: {e}")
@@ -679,48 +680,66 @@ class TradingPlotter:
                 # if True:
                     start_date, end_date = date_range
                     day_low, day_high = day_range
-                    
+
                     for fvg in sorted_fvg_list:
-                        # if fvg['low'] > day_high+((day_high-day_low)/2): continue
-                        # if fvg['high'] < day_low-((day_high-day_low)/2): continue
+                        if fvg['low'] > day_high+((day_high-day_low)/2): continue
+                        if fvg['high'] < day_low-((day_high-day_low)/2): continue
 
                         if end_date <= datetime.fromisoformat(fvg['bar_open_time']):
                             continue
                         
+                        if fvg['filled_timestamp'] and start_date >= datetime.fromisoformat(fvg['filled_timestamp']):
+                            continue
+
                         if fvg['filled_timestamp'] is None:
-                            # if datetime.fromisoformat(fvg['detection_time']) < start_date:
-                            #     fvg['detection_time'] = (start_date - timedelta(minutes=30)).isoformat()
-                            # fvg['filled_timestamp'] = (end_date + timedelta(minutes=30)).isoformat()
-                            todays_fvgs.append(fvg)
-                            continue
+                            if start_date < datetime.fromisoformat(fvg['detection_time']): 
+                                self._draw_fvg_rectangle(fig, fvg, symbol, tf, None, end_date)
+                                continue
+
+                            else:
+                                self._draw_fvg_rectangle(fig, fvg, symbol, tf, start_date, end_date)
+                                continue
+
+                        else:
+                            if (           datetime.fromisoformat(fvg['detection_time'])    < start_date and 
+                                end_date < datetime.fromisoformat(fvg['filled_timestamp'])  
+                                ):
+                                self._draw_fvg_rectangle(fig, fvg, symbol, tf, start_date, end_date)
+                                continue
+
+                            if (start_date < datetime.fromisoformat(fvg['detection_time'])   < end_date and 
+                                start_date < datetime.fromisoformat(fvg['filled_timestamp']) < end_date  
+                                ):
+                                self._draw_fvg_rectangle(fig, fvg, symbol, tf)
+                                continue
+
+                            if (start_date < datetime.fromisoformat(fvg['detection_time'])   < end_date and 
+                                             datetime.fromisoformat(fvg['filled_timestamp']) > end_date  
+                                ):
+                                self._draw_fvg_rectangle(fig, fvg, symbol, tf, None, end_date)
+                                continue
+
+                            if (datetime.fromisoformat(fvg['filled_timestamp']) < end_date and
+                                datetime.fromisoformat(fvg['detection_time'])   < start_date
+                                ):
+                                self._draw_fvg_rectangle(fig, fvg, symbol, tf, start_date, None)
+                                continue
+
+                            if (datetime.fromisoformat(fvg['filled_timestamp']) > end_date and
+                                datetime.fromisoformat(fvg['detection_time'])   > start_date
+                                ):
+                                self._draw_fvg_rectangle(fig, fvg, symbol, tf, None, end_date)
+                                continue
                         
-                        if start_date >= datetime.fromisoformat(fvg['filled_timestamp']):
-                            continue
-
-                        # if datetime.fromisoformat(fvg['detection_time']) < start_date:
-                        #     fvg['detection_time'] = (start_date - timedelta(minutes=30)).isoformat()
-
-                        # if datetime.fromisoformat(fvg['filled_timestamp']) > end_date:
-                        #     fvg['filled_timestamp'] = (end_date + timedelta(minutes=30)).isoformat()
-
-                        todays_fvgs.append(fvg)
-
-                if not todays_fvgs:
-                    # self.logger.info(f"No FVGs found for {symbol}/{tf} within date range")
-                    continue
-                
-                # self.logger.info(f"Processing {len(sorted_fvg_list)} FVGs for {symbol}/{tf}")
-                
-                # Draw each FVG as a rectangle
-                for fvg in todays_fvgs:
-                    self._draw_fvg_rectangle(fig, fvg, symbol, tf)
+                        self._draw_fvg_rectangle(fig, fvg, symbol, tf)
         
         except Exception as e:
             self.logger.error(f"Error adding FVG rectangles: {e}")
             import traceback
             self.logger.error(f"Traceback: {traceback.format_exc()}")
 
-    def _draw_fvg_rectangle(self, fig, fvg: Dict[str, Any], symbol: str, timeframe: str) -> None:
+    def _draw_fvg_rectangle(self, fig, fvg: Dict[str, Any], symbol: str, 
+                            timeframe: str, start: datetime = None, end: datetime = None) -> None:
         """
         Draw a single FVG rectangle on the chart.
         
@@ -767,6 +786,9 @@ class TradingPlotter:
                 end_time = detection_time + timedelta(days=2)
                 is_filled = False
             
+            if start: detection_time = start
+            if end  : end_time       = end
+
             # Determine color and opacity based on FVG type
             if fvg_type == 'bullish':
                 fill_color = 'rgba(0, 200, 100, 0.15)'  # Green, low opacity
@@ -807,7 +829,6 @@ class TradingPlotter:
             )
             
             # Add text label at midpoint of rectangle
-
             mid_time = end_time - (end_time - detection_time) / 10
             mid_price = (high + low) / 2
             label_text = f"{timeframe} - {size_pips:.1f}p"
@@ -896,8 +917,8 @@ class TradingPlotter:
         for symbol, signals in results.items():
             if symbol == "all":
                 continue
-            
-            
+
+
             _multipyer_list = [s.take_profit_pips / s.stop_loss_pips for s in signals]
             multipyer = sum(_multipyer_list) / len(_multipyer_list) if _multipyer_list else 0
             completed = [s for s in signals if hasattr(s, 'is_completed') and s.is_completed]
@@ -951,6 +972,71 @@ class TradingPlotter:
         
         return str(savepath)
 
+    def _calculate_rolling_profit_pct(
+        self,
+        gains: List[float],
+        initial_balance: float,
+        window_size: int,
+        step: int = 1,
+    ) -> tuple[float, float]:
+        """
+        Calculate rolling profit percentages.
+
+        Each window is normalized against the account balance
+        at the START of that window.
+        """
+
+        if (
+            not gains
+            or window_size <= 0
+            or step <= 0
+            or len(gains) < window_size
+            or initial_balance <= 0
+        ):
+            return 0.0, 0.0
+
+        # equity_before[i] = account balance BEFORE gains[i]
+        equity_before = [initial_balance]
+
+        equity = initial_balance
+
+        for g in gains[:-1]:
+            equity += g
+            equity_before.append(equity)
+
+        rolling_pcts = []
+
+        for i in range(0, len(gains) - window_size + 1, step):
+
+            starting_balance = equity_before[i]
+
+            if starting_balance <= 0:
+                continue
+
+            window_profit = sum(gains[i:i + window_size])
+
+            pct = (window_profit / starting_balance) * 100.0
+
+            rolling_pcts.append(pct)
+
+        if not rolling_pcts:
+            return 0.0, 0.0
+
+        # rolling_loss_pcts = []
+        # for pct in rolling_pcts:
+        #     if pct < 0.0:
+        #         rolling_loss_pcts.append(pct)
+
+        # for pct in rolling_pcts:
+        #     print(f"  {pct:.1f}%")
+        # print("=" * 100)
+
+        return (
+            sum(rolling_pcts) / len(rolling_pcts),
+            min(rolling_pcts)
+            # sum(rolling_loss_pcts) / len(rolling_loss_pcts),
+        )
+
     def calculate_joint_statistics(self, all_signals: List[Signal]) -> Dict[str, Any]:
         """Calculate joint statistics across all signals, including drawdown and underwater time"""
 
@@ -980,6 +1066,40 @@ class TradingPlotter:
             key=lambda s: (s.timestamp if getattr(s, "timestamp", None) else datetime.min)
         )
 
+        gains_sequence = []
+
+        current_day = signals_sorted[0].timestamp.date()
+        current_sum = 0.0
+
+        for sig in signals_sorted:
+
+            sig_day = sig.timestamp.date()
+
+            if sig_day != current_day:
+                gains_sequence.append(current_sum)
+
+                current_day = sig_day
+                current_sum = 0.0
+
+            current_sum += sig.gain
+
+        # append final day
+        gains_sequence.append(current_sum)
+
+        avg_weekly_profit_pct, min_weekly_profit_pct = self._calculate_rolling_profit_pct(
+            gains=gains_sequence,
+            initial_balance=initial_balance,
+            window_size=5,
+            step=2,
+        )
+
+        avg_monthly_profit_pct, min_monthly_profit_pct = self._calculate_rolling_profit_pct(
+            gains=gains_sequence,
+            initial_balance=initial_balance,
+            window_size=30,
+            step=15
+        )
+
         # Build equity curve starting at initial_balance
         equity_points = []  # list[(ts, equity)]
         equity = float(initial_balance)
@@ -994,81 +1114,179 @@ class TradingPlotter:
             ts = s.timestamp if getattr(s, "timestamp", None) else (equity_points[-1][0] + timedelta(microseconds=1))
             equity_points.append((ts, equity))
 
-        _multipyer_list = [s.take_profit_pips / s.stop_loss_pips for s in signals_sorted]
-        multipyer = sum(_multipyer_list) / len(_multipyer_list) if _multipyer_list else 0.0
+        rr_ratios = [
+            s.take_profit_pips / s.stop_loss_pips
+            for s in signals_sorted
+            if getattr(s, "stop_loss_pips", 0) not in (0, None)
+        ]
+
+        avg_rr = sum(rr_ratios) / len(rr_ratios) if rr_ratios else 0.0
        
         max_dd_abs = 0.0
         max_dd_pct = 0.0
         longest_uw = timedelta(0)
         current_uw_start: Optional[datetime] = None
 
+        # Max drawdown lifecycle tracking
+        max_dd_peak_ts: Optional[datetime] = None
+        max_dd_trough_ts: Optional[datetime] = None
+        max_dd_recovery_ts: Optional[datetime] = None
+
+        # Current drawdown state tracking
+        current_peak_ts: Optional[datetime] = None
+        current_trough_ts: Optional[datetime] = None
+
+        # Longest underwater interval tracking
+        longest_uw_start: Optional[datetime] = None
+        longest_uw_end: Optional[datetime] = None
+
         # Initialize rolling peak to initial_balance
         peak_equity = equity_points[0][1] if equity_points else initial_balance
+        current_peak_ts = equity_points[0][0] if equity_points else None
 
         for ts, eq in equity_points:
-            # New peak closes any underwater interval
-            if eq > peak_equity + 1e-12:
+
+            # Recovery / new peak
+            if eq >= peak_equity - 1e-12:
+
+                # Close underwater interval
                 if current_uw_start is not None:
-                    longest_uw = max(longest_uw, ts - current_uw_start)
+
+                    uw_duration = ts - current_uw_start
+
+                    if uw_duration > longest_uw:
+                        longest_uw = uw_duration
+                        longest_uw_start = current_uw_start
+                        longest_uw_end = ts
+
                     current_uw_start = None
+
+                # If this recovery closes the MAX DD cycle,
+                # store recovery timestamp
+                if (
+                    max_dd_trough_ts is not None
+                    and current_trough_ts == max_dd_trough_ts
+                    and max_dd_recovery_ts is None
+                ):
+                    max_dd_recovery_ts = ts
+
                 peak_equity = eq
+                current_peak_ts = ts
+                current_trough_ts = None
 
             dd_abs = max(0.0, peak_equity - eq)
-            # Percent drawdown guarded against tiny peaks
             dd_pct = (dd_abs / peak_equity) if peak_equity > 1e-9 else 0.0
 
+            # New maximum drawdown found
             if dd_abs > max_dd_abs:
+
                 max_dd_abs = dd_abs
-            if dd_pct > max_dd_pct:
                 max_dd_pct = dd_pct
+
+                max_dd_peak_ts = current_peak_ts
+                max_dd_trough_ts = ts
+                max_dd_recovery_ts = None
+
+                current_trough_ts = ts
+
+            elif dd_abs > 0:
+                # Continue tracking current trough
+                current_trough_ts = ts
 
             # Track underwater intervals
             if eq < peak_equity - 1e-12:
+
                 if current_uw_start is None:
                     current_uw_start = ts
+
             else:
+
                 if current_uw_start is not None:
-                    longest_uw = max(longest_uw, ts - current_uw_start)
+
+                    uw_duration = ts - current_uw_start
+
+                    if uw_duration > longest_uw:
+                        longest_uw = uw_duration
+                        longest_uw_start = current_uw_start
+                        longest_uw_end = ts
+
                     current_uw_start = None
 
-        # If still underwater at the end, close the interval at the last timestamp
+        # If still underwater at the end, close interval at last timestamp
         if current_uw_start is not None:
-            last_ts = equity_points[-1][0]
-            longest_uw = max(longest_uw, last_ts - current_uw_start)
 
+            last_ts = equity_points[-1][0]
+            uw_duration = last_ts - current_uw_start
+
+            if uw_duration > longest_uw:
+                longest_uw = uw_duration
+                longest_uw_start = current_uw_start
+                longest_uw_end = last_ts
 
         # Group equity points by date and calculate daily P&L and drawdown
-        from collections import defaultdict
-        
-        daily_equity = defaultdict(list)  # {date: [equity_values]}
-        
+        daily_equity_points = defaultdict(list)  # {date: [(ts1, eq1), (ts2, eq2), ...]}
+
         for ts, eq in equity_points:
             date = ts.date()
-            daily_equity[date].append(eq)
-        
-        # Calculate daily metrics
-        daily_drawdowns = []  # List of (date, dd_abs, dd_pct)
-        daily_pnl = []  # List of (date, pnl)
-        
-        sorted_dates = sorted(daily_equity.keys())
-        for date in sorted_dates:
-            day_equity_values = daily_equity[date]
-            
-            # Daily high/low equity
-            day_high = max(day_equity_values)
-            day_low = min(day_equity_values)
+            daily_equity_points[date].append((ts, eq))
 
-            # Calculate drawdown from daily peak to daily low
-            daily_dd_abs = max(0.0, day_high - day_low)
-            daily_dd_pct = (daily_dd_abs / day_high) if day_high > 1e-9 else 0.0
-            
-            daily_drawdowns.append((date, daily_dd_abs, daily_dd_pct))
-            
-        
+        # Now calculate daily drawdowns using the ordered points
+        daily_drawdowns = []  # List of (date, dd_abs, dd_pct)
+
+        sorted_dates = sorted(daily_equity_points.keys())
+        for date in sorted_dates:
+            day_points = daily_equity_points[date]  # list of (ts, eq) already in order
+            if not day_points:
+                continue
+
+            peak = day_points[0][1]  # starting equity for the day
+            max_ddd_abs = 0.0
+
+            for _, eq in day_points:
+                if eq > peak:
+                    peak = eq
+                dd_abs = peak - eq
+                if dd_abs > max_ddd_abs:
+                    max_ddd_abs = dd_abs
+
+            # Percent drawdown relative to the current day's peak
+            dd_pct = (max_ddd_abs / peak) if peak > 1e-9 else 0.0
+            daily_drawdowns.append((date, max_ddd_abs, dd_pct))
+
         # Find maximum daily drawdown
         daily_dd_abs = max((dd[1] for dd in daily_drawdowns), default=0.0)
         daily_dd_pct = max((dd[2] for dd in daily_drawdowns), default=0.0)
 
+        expectancy = 0.0
+        if usable:
+            win_rate = len(wins) / len(usable)
+            loss_rate = len(losses) / len(usable)
+
+            avg_win = (sum(win_gains) / len(win_gains)) if win_gains else 0.0
+            avg_loss = abs(sum(loss_gains) / len(loss_gains)) if loss_gains else 0.0
+
+            expectancy = (win_rate * avg_win) - (loss_rate * avg_loss)
+
+        max_consecutive_wins = 0
+        max_consecutive_losses = 0
+
+        current_wins = 0
+        current_losses = 0
+
+        for s in signals_sorted:
+
+            gain = getattr(s, "gain", 0.0) or 0.0
+
+            if gain >= 0:
+                current_wins += 1
+                current_losses = 0
+            else:
+                current_losses += 1
+                current_wins = 0
+
+            max_consecutive_wins = max(max_consecutive_wins, current_wins)
+            max_consecutive_losses = max(max_consecutive_losses, current_losses)
+        
         return {
             'total_signals': len(usable),
             'total_wins': len(wins),
@@ -1095,15 +1313,43 @@ class TradingPlotter:
             # Daily drawdown metrics
             'daily_drawdown_abs': daily_dd_abs,
             'daily_drawdown_pct': daily_dd_pct * 100.0,
+
+            # Max drawdown lifecycle
+            'drawdown_peak_date': max_dd_peak_ts,
+            'drawdown_trough_date': max_dd_trough_ts,
+            'drawdown_recovery_date': max_dd_recovery_ts,
+
+            # Longest underwater interval
+            'underwater_start': longest_uw_start,
+            'underwater_end': longest_uw_end,
+
+            # Expectancy
+            'expectancy': expectancy,
+
+            # Average Ratio
+            'avg_risk_reward': avg_rr,
+
+            # Streaks
+            'max_consecutive_wins': max_consecutive_wins,
+            'max_consecutive_losses': max_consecutive_losses,
+
+            'avg_weekly_profit_pct': avg_weekly_profit_pct,
+            'avg_monthly_profit_pct': avg_monthly_profit_pct,            
+
+            'min_weekly_profit_pct': min_weekly_profit_pct,
+            'min_monthly_profit_pct': min_monthly_profit_pct, 
         }
 
     def create_cumulative_chart_only(self, joint_stats: Dict) -> str:
         """Create only the joint cumulative performance chart"""
+
         charts_html = ""
         if joint_stats.get('signals'):
             fig_cumulative = self.create_joint_cumulative_chart(
-                                    joint_stats['signals'], joint_stats['daily_drawdown_pct'], 
-                                    joint_stats['drawdown_pct'], joint_stats['underwater_time'])
+                                    joint_stats['signals'], joint_stats['drawdown_peak_date'], 
+                                    joint_stats['drawdown_trough_date'], joint_stats['underwater_time'],
+                                    joint_stats['drawdown_pct']
+                                    )
             
             chart_div = pyo.plot(
                 fig_cumulative,
@@ -1121,7 +1367,7 @@ class TradingPlotter:
             """
         return charts_html
 
-    def create_joint_cumulative_chart(self, signals: List[Signal], daily_pct, pct, uwt) -> go.Figure:
+    def create_joint_cumulative_chart(self, signals: List[Signal], uwts, uwte, uwt, dd) -> go.Figure:
         """Create joint cumulative performance chart for all signals"""
         
         fig = go.Figure()
@@ -1202,9 +1448,11 @@ class TradingPlotter:
                     font=dict(size=10)
                 )
         
+        uwte_date = uwte.date() if uwte else "inf"
+        uwts_date = uwts.date() if uwts else "inf"
         fig.update_layout(
             title={
-                'text': f'Daily DrawDown pct: {round(daily_pct, 2)}%    -    DrawDown pct: {round(pct, 2)}%    -    UnderWater Time: {uwt.days} days',
+                'text': f'PDD start: {uwts_date}    -    PDD end: {uwte_date}    -    Max UWT: {uwt.days} days    -    MAX DD: {dd:.1f} %',
                 'x': 0.5,
                 'xanchor': 'right'
             },
@@ -1322,6 +1570,8 @@ class TradingPlotter:
             "🛠️"
         )
 
+        return """"""
+
         return f"""
         <div class="flags-section" style="background: white; border-radius: 10px; padding: 25px; 
             box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin-bottom: 30px;">
@@ -1378,7 +1628,11 @@ class TradingPlotter:
             return ""
         
         win_percent = (joint_stats.get('total_profit', 0) / joint_stats.get('initial_balance', 0)) * 100
-        current_budget = joint_stats.get('final_equity', 0)
+        avg_monthly_profit_pct = joint_stats.get('avg_monthly_profit_pct', 0)
+        avg_weekly_profit_pct = joint_stats.get('avg_weekly_profit_pct', 0)
+
+        min_monthly_profit_pct = joint_stats.get('min_monthly_profit_pct', 0)
+        min_weekly_profit_pct = joint_stats.get('min_weekly_profit_pct', 0)
         return f"""
         <div class="chart-section">
             <h3>Overall Performance</h3>
@@ -1392,16 +1646,24 @@ class TradingPlotter:
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Profit Percent</div>
                 </div>
                 <div style="background: rgba(230, 126, 34, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e67e22;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">${current_budget:.0f}</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Current Budget</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{avg_monthly_profit_pct:.1f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">AVG monthly profit percent</div>
+                </div>
+                <div style="background: rgba(230, 126, 34, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e67e22;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{min_monthly_profit_pct:.1f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">MIN monthly profit percent</div>
+                </div>
+                <div style="background: rgba(52, 73, 94, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #34495e;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{avg_weekly_profit_pct:.1f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">AVG weakly profit percent</div>
+                </div>
+                <div style="background: rgba(52, 73, 94, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #34495e;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{min_weekly_profit_pct:.1f}%</div>
+                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">MIN weakly profit percent</div>
                 </div>
                 <div style="background: rgba(231, 76, 60, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #e74c3c;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('daily_drawdown_pct', 0):.1f}%</div>
                     <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">Daily DrawDown Percent</div>
-                </div>
-                <div style="background: rgba(52, 73, 94, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #34495e;">
-                    <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{abs(joint_stats.get('drawdown_pct', 0)):.1f}%</div>
-                    <div style="font-size: 14px; color: #7f8c8d; margin-top: 5px;">DrawDown Percent</div>
                 </div>
                 <div style="background: rgba(155, 89, 182, 0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #9b59b6;">
                     <div style="font-size: 24px; font-weight: bold; color: #2c3e50;">{joint_stats.get('total_signals', 0):.0f}</div>
@@ -1824,7 +2086,7 @@ class TradingPlotter:
             signal_type = signal.signal_type.value.upper() if hasattr(signal, 'signal_type') and signal.signal_type else "N/A"
 
             # Outcome and adjustments
-            outcome = signal.outcome.value.upper() if hasattr(signal, 'outcome') and signal.outcome else 'PENDING'
+            outcome = "WIN" if signal.gain > 0.0 else "LOSS"
             sl_adjusted = signal.sl_adjusted_count if hasattr(signal, 'sl_adjusted_count') else 0
             
             # Lot size and pips
@@ -1865,7 +2127,7 @@ class TradingPlotter:
                 chart_button = '<button class="btn-show-chart" disabled>No Chart</button>'
             
             # Determine CSS class for outcome
-            outcome_class = "win" if hasattr(signal, 'gain') and signal.gain and signal.gain > 0 else "loss" if hasattr(signal, 'gain') and signal.gain and signal.gain < 0 else "neutral"
+            # outcome_class = "win" if hasattr(signal, 'gain') and signal.gain and signal.gain > 0 else "loss" if hasattr(signal, 'gain') and signal.gain and signal.gain < 0 else "neutral"
             has_flag = signal.used_flag
             row_class = "flagged" if has_flag else ""
 
@@ -1876,14 +2138,14 @@ class TradingPlotter:
                 <td>{symbol}</td>
                 <td>{action}</td>
                 <td>{signal_type}</td>
-                <td class="{outcome_class}">{outcome}</td>
-                <td>{sl_adjusted}</td>
-                <td>{lot_size}</td>
-                <td>{sl_pips}</td>
-                <td>{tp_pips}</td>
-                <td>{commission}</td>
-                <td class="{outcome_class}">{profit}</td>
-                <td>{current_balance}</td>
+                <td class="{outcome.lower()}">{outcome}</td>
+                <td>{lot_size} lots</td>
+                <td>$ {commission}</td>
+                <td>{sl_pips} pips</td>
+                <td>{tp_pips} pips</td>
+                <td>{(signal.take_profit_pips / signal.stop_loss_pips):.1f}</td>
+                <td class="$ {outcome.lower()}">$ {profit}</td>
+                <td>$ {current_balance}</td>
                 <td>{chart_button}</td>
             </tr>
             """
@@ -1901,11 +2163,11 @@ class TradingPlotter:
                             <th>Action</th>
                             <th>Type</th>
                             <th>Outcome</th>
-                            <th>SL Adj</th>
                             <th>Lot Size</th>
+                            <th>Commission</th>
                             <th>SL Pips</th>
                             <th>TP Pips</th>
-                            <th>Commission</th>
+                            <th>Ratio</th>
                             <th>Profit</th>
                             <th>Balance</th>
                             <th>Chart</th>
