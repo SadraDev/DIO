@@ -685,7 +685,7 @@ class TradingPlotter:
                         if fvg['low'] > day_high+((day_high-day_low)/2): continue
                         if fvg['high'] < day_low-((day_high-day_low)/2): continue
 
-                        if end_date <= datetime.fromisoformat(fvg['bar_open_time']):
+                        if end_date <= datetime.fromisoformat(fvg['detection_time']):
                             continue
                         
                         if fvg['filled_timestamp'] and start_date >= datetime.fromisoformat(fvg['filled_timestamp']):
