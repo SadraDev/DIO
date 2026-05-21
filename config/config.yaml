@@ -5,6 +5,8 @@ system:
 paths:
   logs: reports/logs
   csvs: reports/CSVs
+  fvgs: reports/fvgs
+  signals: reports/signals
 
 account:
   balance: 10000
@@ -17,8 +19,8 @@ account:
 trading:
   commission: 5.0
   symbols:
-  - EURUSD.
-  - GBPUSD.
+  - EURUSD
+  - GBPUSD
   max_signals_per_symbol: 2
   risk:
     max_risk_percent: 0.05

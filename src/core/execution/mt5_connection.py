@@ -157,14 +157,14 @@ class MT5Connection:
             request = {
                 "action":    mt5.TRADE_ACTION_DEAL,
                 "symbol":    signal.symbol,
-                "volume":    min(signal.entry_lot / 10, 0.01),
+                "volume":    min(signal.entry_lot, 0.01),
                 "type":      order_type,
                 "price":     price,
                 "sl":        stop_loss,
                 "tp":        take_profit,
                 "deviation": self.deviation,
                 "magic":     self.magic_number,
-                "comment":   "TwoHuntersLive-StandAlone",
+                "comment":   "TwoHunters-S",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -259,14 +259,14 @@ class MT5Connection:
             request = {
                 "action": mt5.TRADE_ACTION_PENDING,
                 "symbol": signal.symbol,
-                "volume": min(signal.entry_lot / 10, 0.01),
+                "volume": min(signal.entry_lot, 0.01),
                 "type": order_type,
                 "price": entry_price,
                 "sl": stop_loss,
                 "tp": take_profit,
                 "deviation": self.deviation,
                 "magic": self.magic_number,
-                "comment": "TwoHuntersLive-StandAlone",
+                "comment": "TwoHunters-S",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_RETURN,
             }
@@ -343,8 +343,6 @@ class MT5Connection:
             tick  = mt5.symbol_info_tick(signal.symbol)
             if tick is None:
                 mt5.initialize()
-
-            if not tick:
                 import time
 
             while not tick:
@@ -391,7 +389,7 @@ class MT5Connection:
                     "tp":           take_profit,
                     "deviation":    self.deviation,
                     "magic":        self.magic_number,
-                    "comment":      "ScaleIn",
+                    "comment":      "TwoHunters-S-ScaleIn",
                     "type_time":    mt5.ORDER_TIME_GTC,
                     "type_filling": mt5.ORDER_FILLING_IOC,
                 }
@@ -439,7 +437,7 @@ class MT5Connection:
                     "position":     signal.ticket,      # ties the deal to the open position
                     "deviation":    self.deviation,
                     "magic":        self.magic_number,
-                    "comment":      "ScaleOut",
+                    "comment":      "TwoHunters-S-ScaleOut",
                     "type_time":    mt5.ORDER_TIME_GTC,
                     "type_filling": mt5.ORDER_FILLING_IOC,
                 }
@@ -475,7 +473,7 @@ class MT5Connection:
                     "sl": stop_loss,
                     "tp": take_profit,
                     "magic": self.magic_number,
-                    "comment": "SL/TP Update",
+                    "comment": "TwoHunters-S-SL/TP-Update",
                 }
                 
                 result = mt5.order_send(request)

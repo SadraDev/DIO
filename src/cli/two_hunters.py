@@ -288,10 +288,11 @@ def live(ctx):
 
         # ── preload FVGs ──────────────────────────────────────
         try:
-            log.info("Loading FVG cache...")
+            log.info("Detecting Todays FVGs...")
             detector = FVGDetector(symbols=symbols, timeframes=["M15", "H8"])
-            detector.load_fvgs_from_cache()
-            log.info("FVGs loaded")
+            detector.clear_cache()
+            detector.detect(now() - timedelta(days=60), now())
+            log.info("FVGs Detected.")
         except Exception as e:
             log.error(f"FVG load failed: {e}")
 

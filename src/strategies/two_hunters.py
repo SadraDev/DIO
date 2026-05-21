@@ -558,7 +558,7 @@ class TwoHunters():
         # self.fvg_detector.detect(start_date - timedelta(days=60), end_date)  # TODO: move to config
         self.fvg_detector.load_fvgs_from_cache()
         click.echo(f"FVGs Detected.")
-        c = 0
+
         try:
             # Fetch historical data
             self.logger.info(f"Fetching data for {symbols} from {start_date} to {end_date}")
@@ -612,9 +612,6 @@ class TwoHunters():
                                             self.logger.debug(f"Recovery signal completed: "
                                                             f"{recovery_signal.outcome.value}, "
                                                             f"Gain: {recovery_signal.gain}")
-                        
-                                if main_signal.commission == abs(main_signal.gain):
-                                    c+=1
 
                 days_processed += 1
                 current_date += timedelta(days=1)
@@ -725,7 +722,6 @@ class TwoHunters():
             # ── bootstrap bars ────────────────────────────────────────────
 
             self.all_bars = fetcher.get_latest_bars(self.symbol, count=800)
-            logger.info(f"{self.symbol} worker started | {len(self.all_bars)} bars loaded")
 
             # ── restore today's signals from disk (restart guard) ─────────
 
@@ -744,28 +740,45 @@ class TwoHunters():
             # ── small helpers ─────────────────────────────────────────────
 
             def fetch_and_append():
-                latest = fetcher.get_latest_bars(self.symbol, count=1)
-                if latest:
-                    bar = latest[-1]
-                    if bar.timestamp > self.all_bars[-1].timestamp:
-                        self.all_bars.append(bar)
-                        logger.info(f"{self.symbol} new bar {bar.timestamp}")
+                latest = fetcher.get_latest_bars(self.symbol, count=2)
+                if latest and len(latest) >= 2:
+                    completed_bar = latest[0]  # older bar = completed
+                    if completed_bar.timestamp > self.all_bars[-1].timestamp:
+                        self.all_bars.append(completed_bar)
+                        logger.info(f"{self.symbol} new bar {completed_bar.timestamp}")
 
             def place(signal):
-                """Place a signal unless it is already on disk, return it or None."""
+                """Place a signal unless it is already on disk, return it or None.
+                Retries placement for up to 60 seconds on failure."""
                 if signal is None:
                     return None
                 if signal_exists(signal):
                     logger.info(f"{self.symbol} duplicate signal – skipping placement")
                     return signal          # already placed before restart
-                placed = (
-                    mt5_conn.place_pending_order(signal)
-                    if signal.is_order
-                    else mt5_conn.place_market_order(signal)
-                )
-                if placed:
-                    save_signal(signal)
-                    return signal
+
+                deadline = datetime.now(BROKER_TZ) + timedelta(seconds=60)
+                attempt  = 0
+                while datetime.now(BROKER_TZ) < deadline and not stop_event.is_set():
+                    attempt += 1
+                    placed = (
+                        mt5_conn.place_pending_order(signal)
+                        if signal.is_order
+                        else mt5_conn.place_market_order(signal)
+                    )
+                    if placed:
+                        save_signal(signal)
+                        if attempt > 1:
+                            logger.info(f"{self.symbol} signal placed after {attempt} attempts")
+                        return signal
+
+                    remaining = max(0, deadline - datetime.now(BROKER_TZ))
+                    logger.warning(
+                        f"{self.symbol} placement attempt {attempt} failed – "
+                        f"retrying ({remaining:.0f}s remaining)"
+                    )
+                    time.sleep(1)
+
+                logger.error(f"{self.symbol} signal placement failed after {attempt} attempts (1-min timeout)")
                 return None
 
             def print_signal_status(sig, label):
@@ -791,13 +804,12 @@ class TwoHunters():
                 Block here, printing status every second, until the signal
                 closes or the stop_event fires.  Saves to disk each tick.
                 """
-                _r_one_triggered = False
                 while not stop_event.is_set():
                     fetch_and_append()
                     sig = mt5_conn.monitor_signal(sig)
-                    if label == "RECOVERY" and sig.gain >= sig.entry_lot * sig.stop_loss_pips and not _r_one_triggered:
-                        _r_one_triggered = True
-                        mt5_conn.update_order(sig, - sig.entry_lot / 2)
+                    if label == "MAIN" and sig.gain <= 0 and sig.sl_adjusted_count == 0:
+                        sig.sl_adjusted_count += 1
+                        mt5_conn.update_order(sig, - 0.01)
                     save_signal(sig)
                     print_signal_status(sig, label)
                     if sig.is_completed:
