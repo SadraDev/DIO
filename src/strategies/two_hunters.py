@@ -746,7 +746,7 @@ class TwoHunters():
                 logger.info(f"{self.symbol} duplicate signal – skipping placement")
                 return signal          # already placed before restart
 
-            deadline = datetime.now(BROKER_TZ) + timedelta(seconds=60)
+            deadline = (signal.timestamp + timedelta(seconds=60)).replace(tzinfo=BROKER_TZ)
             attempt  = 0
             while datetime.now(BROKER_TZ) < deadline and not stop_event.is_set():
                 attempt += 1
@@ -768,7 +768,8 @@ class TwoHunters():
                 )
                 time.sleep(1)
 
-            logger.error(f"{self.symbol} signal placement failed after {attempt} attempts (1-min timeout)")
+            timeout = (datetime.now(BROKER_TZ) - deadline).total_seconds() // 60
+            logger.error(f"{self.symbol} signal placement failed after {attempt} attempts ({timeout:.0f}-min timeout)")
             return None
 
         def print_signal_status(sig, label):
