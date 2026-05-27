@@ -456,16 +456,18 @@ class BreakoutEngine(BaseIndicator):
         """
         Check if this_bar is valid for order placement based on previous bar and direction.
         """
-        
+
         _m = settings.get("strategies.two_hunters.flags.order_block_significance")
 
         if direction == 'SELL':
             if this_bar.close < prev_bar.low - (prev_bar.range*_m) and this_bar.is_bearish:
                 return this_bar
+            # if this_bar.upper_wick / this_bar.range >= 0.9: return this_bar
 
         elif direction == 'BUY':
             if this_bar.close > prev_bar.high + (prev_bar.range*_m) and this_bar.is_bullish:
                 return this_bar
+            # if this_bar.lower_wick / this_bar.range >= 0.9: return this_bar
 
         return None
 

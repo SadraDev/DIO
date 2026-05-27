@@ -39,7 +39,7 @@ class FVGDetector(BaseIndicator):
             timeframes: List of timeframes to analyze (e.g., 'M1', 'M15', 'H1')
         """
         super().__init__("FVGDetector")
-        self.symbols = symbols or ["GBPUSD", "EURUSD"]
+        self.symbols = symbols or settings.symbols
         self.fetcher = DataFetcher()
         self.min_gap_pips = min_gap_pips
         self.max_gap_pips = max_gap_pips

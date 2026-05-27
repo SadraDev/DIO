@@ -346,25 +346,14 @@ class TwoHunters():
                 session_bars=session_bars, mbox_result=mbox_result
             )
         
-        elif True:
+        else:
             self.breakout_engine.type = BreakoutType.CUSTOM
 
             bars_after_failed = [bar for bar in session_bars if bar.timestamp >= failed_signal.outcome_timestamp]
                         
             extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.breakout(
                 session_bars=bars_after_failed, failed_signal=failed_signal
-            )
-        
-        else:
-            self.breakout_engine.type = BreakoutType.RECOVERY
-        
-            mbox_bars.extend([bar for bar in session_bars if bar.timestamp <= failed_signal.outcome_timestamp])
-            recovery_bars = [bar for bar in session_bars if failed_signal.outcome_timestamp <= bar.timestamp]
-            extended_mbox_results = self.mbox_analyzer.calculate(mbox_bars)
-            
-            extrema, signal_bar, action, hunter_bar, _ = self.breakout_engine.breakout(
-                recovery_bars=recovery_bars, extended_mbox_results=extended_mbox_results
-            )            
+            )          
         
         if not signal_bar:
             self.logger.debug("No breakout signal found")
@@ -498,6 +487,7 @@ class TwoHunters():
         _r = abs(signal.entry_price - signal.stop_loss)
         
         signal.entry_lot = self.budget.lots_from_diff(signal.symbol, _r)
+        # signal.entry_lot = 1.0
         signal.take_profit_pips = self.budget.pips_from_diff(abs(signal.take_profit - signal.entry_price))
         signal.stop_loss_pips = self.budget.pips_from_diff(_r)
 
@@ -669,209 +659,209 @@ class TwoHunters():
 
     def live_worker(self, stop_event: threading.Event, mt5_conn: MT5Connection, signals_file_lock: threading.Lock):
 
-            import json, time
-            from datetime import datetime, timedelta, timezone
-            from src.core.data.fetcher import DataFetcher
-            from src.core.models.signal import Signal, SignalType, SignalOutcome
-            from src.core.utils.logger import TradingLogger
+        import json, time
+        from datetime import datetime, timedelta, timezone
+        from src.core.data.fetcher import DataFetcher
+        from src.core.models.signal import Signal, SignalType
+        from src.core.utils.logger import TradingLogger
 
-            logger    = TradingLogger.get_main_logger()
-            BROKER_TZ = timezone(timedelta(hours=6, minutes=30))
-            fetcher   = DataFetcher()
+        logger    = TradingLogger.get_main_logger()
+        BROKER_TZ = timezone(timedelta(hours=6, minutes=30))
+        fetcher   = DataFetcher()
 
-            signals_dir  = settings.get("paths.signals")
-            signals_file = f"{signals_dir}/{datetime.now(BROKER_TZ).strftime('%Y-%m-%d')}.json"
+        signals_dir  = settings.get("paths.signals")
+        signals_file = f"{signals_dir}/{datetime.now(BROKER_TZ).strftime('%Y-%m-%d')}.json"
 
-            # ── JSON helpers ──────────────────────────────────────────────
+        # ── JSON helpers ──────────────────────────────────────────────
 
-            def _read_file():
-                """Read raw JSON from disk – always called inside the lock."""
-                try:
-                    with open(signals_file, "r") as f:
-                        return json.load(f)
-                except Exception:
-                    return {}
+        def _read_file():
+            """Read raw JSON from disk – always called inside the lock."""
+            try:
+                with open(signals_file, "r") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
 
-            def load_signals():
-                with signals_file_lock:
-                    return _read_file()
+        def load_signals():
+            with signals_file_lock:
+                return _read_file()
 
-            def save_signal(signal):
-                with signals_file_lock:
-                    data = _read_file()           # read while already holding the lock
-                    existing = [
-                        s for s in data.get(self.symbol, [])
-                        if s.get("ticket") != signal.ticket
-                    ]
-                    existing.append(signal.to_dict())
-                    data[self.symbol] = existing
-                    with open(signals_file, "w") as f:
-                        json.dump(data, f, indent=2)
+        def save_signal(signal):
+            with signals_file_lock:
+                data = _read_file()           # read while already holding the lock
+                existing = [
+                    s for s in data.get(self.symbol, [])
+                    if s.get("ticket") != signal.ticket
+                ]
+                existing.append(signal.to_dict())
+                data[self.symbol] = existing
+                with open(signals_file, "w") as f:
+                    json.dump(data, f, indent=2)
 
-            def signal_exists(signal):
-                """True if a signal with matching levels is already on disk."""
-                for s in load_signals().get(self.symbol, []):
-                    if (
-                        s["entry_price"] == signal.entry_price and
-                        s["stop_loss"]   == signal.stop_loss   and
-                        s["take_profit"] == signal.take_profit
-                    ):
-                        return True
-                return False
-
-            # ── bootstrap bars ────────────────────────────────────────────
-
-            self.all_bars = fetcher.get_latest_bars(self.symbol, count=800)
-
-            # ── restore today's signals from disk (restart guard) ─────────
-
-            active_main_signal     = None
-            active_recovery_signal = None
-
+        def signal_exists(signal):
+            """True if a signal with matching levels is already on disk."""
             for s in load_signals().get(self.symbol, []):
-                sig = Signal.from_dict(s)
-                if sig.signal_type == SignalType.MAIN and active_main_signal is None:
-                    active_main_signal = sig
-                    logger.info(f"{self.symbol} restored main signal (ticket {sig.ticket})")
-                elif sig.signal_type == SignalType.RECOVERY and active_recovery_signal is None:
-                    active_recovery_signal = sig
-                    logger.info(f"{self.symbol} restored recovery signal (ticket {sig.ticket})")
+                if (
+                    s["entry_price"] == signal.entry_price and
+                    s["stop_loss"]   == signal.stop_loss   and
+                    s["take_profit"] == signal.take_profit
+                ):
+                    return True
+            return False
 
-            # ── small helpers ─────────────────────────────────────────────
+        # ── bootstrap bars ────────────────────────────────────────────
 
-            def fetch_and_append():
-                latest = fetcher.get_latest_bars(self.symbol, count=2)
-                if latest and len(latest) >= 2:
-                    completed_bar = latest[0]  # older bar = completed
-                    if completed_bar.timestamp > self.all_bars[-1].timestamp:
-                        self.all_bars.append(completed_bar)
-                        logger.info(f"{self.symbol} new bar {completed_bar.timestamp}")
+        self.all_bars = fetcher.get_latest_bars(self.symbol, count=800)
 
-            def place(signal):
-                """Place a signal unless it is already on disk, return it or None.
-                Retries placement for up to 60 seconds on failure."""
-                if signal is None:
-                    return None
-                if signal_exists(signal):
-                    logger.info(f"{self.symbol} duplicate signal – skipping placement")
-                    return signal          # already placed before restart
+        # ── restore today's signals from disk (restart guard) ─────────
 
-                deadline = datetime.now(BROKER_TZ) + timedelta(seconds=60)
-                attempt  = 0
-                while datetime.now(BROKER_TZ) < deadline and not stop_event.is_set():
-                    attempt += 1
-                    placed = (
-                        mt5_conn.place_pending_order(signal)
-                        if signal.is_order
-                        else mt5_conn.place_market_order(signal)
-                    )
-                    if placed:
-                        save_signal(signal)
-                        if attempt > 1:
-                            logger.info(f"{self.symbol} signal placed after {attempt} attempts")
-                        return signal
+        active_main_signal     = None
+        active_recovery_signal = None
 
-                    remaining = max(0, deadline - datetime.now(BROKER_TZ))
-                    logger.warning(
-                        f"{self.symbol} placement attempt {attempt} failed – "
-                        f"retrying ({remaining:.0f}s remaining)"
-                    )
-                    time.sleep(1)
+        for s in load_signals().get(self.symbol, []):
+            sig = Signal.from_dict(s)
+            if sig.signal_type == SignalType.MAIN and active_main_signal is None:
+                active_main_signal = sig
+                logger.info(f"{self.symbol} restored main signal (ticket {sig.ticket})")
+            elif sig.signal_type == SignalType.RECOVERY and active_recovery_signal is None:
+                active_recovery_signal = sig
+                logger.info(f"{self.symbol} restored recovery signal (ticket {sig.ticket})")
 
-                logger.error(f"{self.symbol} signal placement failed after {attempt} attempts (1-min timeout)")
+        # ── small helpers ─────────────────────────────────────────────
+
+        def fetch_and_append():
+            latest = fetcher.get_latest_bars(self.symbol, count=2)
+            if latest and len(latest) >= 2:
+                completed_bar = latest[0]  # older bar = completed
+                if completed_bar.timestamp > self.all_bars[-1].timestamp:
+                    self.all_bars.append(completed_bar)
+                    logger.info(f"{self.symbol} new bar {completed_bar.timestamp}")
+
+        def place(signal):
+            """Place a signal unless it is already on disk, return it or None.
+            Retries placement for up to 60 seconds on failure."""
+            if signal is None:
                 return None
+            if signal_exists(signal):
+                logger.info(f"{self.symbol} duplicate signal – skipping placement")
+                return signal          # already placed before restart
 
-            def print_signal_status(sig, label):
-                """Print a one-line live status for the active signal."""
-                order_data = mt5_conn.get_open_order(sig)
-                ts = datetime.now(BROKER_TZ).strftime("%H:%M:%S")
-                if order_data:
-                    profit_str = (
-                        f"  Profit: ${order_data['profit']:.2f}"
-                        if order_data.get("profit") is not None
-                        else "  (pending order)"
-                    )
-                    print(
-                        f"[{ts}] {self.symbol} {label} | "
-                        f"Lots={sig.entry_lot} | "
-                        f"{sig.action.value} @ {sig.entry_price:.5f} | "
-                        f"SL={sig.stop_loss_pips:.1f}  TP={sig.take_profit_pips:.1f}"
-                        f"{profit_str}"
-                    )
+            deadline = datetime.now(BROKER_TZ) + timedelta(seconds=60)
+            attempt  = 0
+            while datetime.now(BROKER_TZ) < deadline and not stop_event.is_set():
+                attempt += 1
+                placed = (
+                    mt5_conn.place_pending_order(signal)
+                    if signal.is_order
+                    else mt5_conn.place_market_order(signal)
+                )
+                if placed:
+                    save_signal(signal)
+                    if attempt > 1:
+                        logger.info(f"{self.symbol} signal placed after {attempt} attempts")
+                    return signal
 
-            def monitor_loop(sig, label):
-                """
-                Block here, printing status every second, until the signal
-                closes or the stop_event fires.  Saves to disk each tick.
-                """
-                while not stop_event.is_set():
-                    fetch_and_append()
-                    sig = mt5_conn.monitor_signal(sig)
-                    if label == "MAIN" and sig.gain <= 0 and sig.sl_adjusted_count == 0:
-                        sig.sl_adjusted_count += 1
-                        mt5_conn.update_order(sig, - 0.01)
-                    save_signal(sig)
-                    print_signal_status(sig, label)
-                    if sig.is_completed:
-                        ts = datetime.now(BROKER_TZ).strftime("%H:%M:%S")
-                        print(
-                            f"[{ts}] {self.symbol} {label} CLOSED | "
-                            f"outcome={sig.outcome.value.upper()} | "
-                            f"gain=${sig.gain:.2f}"
-                        )
-                        return
-                    time.sleep(1)
+                remaining = max(0, deadline - datetime.now(BROKER_TZ))
+                logger.warning(
+                    f"{self.symbol} placement attempt {attempt} failed – "
+                    f"retrying ({remaining:.0f}s remaining)"
+                )
+                time.sleep(1)
 
+            logger.error(f"{self.symbol} signal placement failed after {attempt} attempts (1-min timeout)")
+            return None
 
-            # ── MAIN LOOP ─────────────────────────────────────────────────
+        def print_signal_status(sig, label):
+            """Print a one-line live status for the active signal."""
+            order_data = mt5_conn.get_open_order(sig)
+            ts = datetime.now(BROKER_TZ).strftime("%H:%M:%S")
+            if order_data:
+                profit_str = (
+                    f"  Profit: ${order_data['profit']:.2f}"
+                    if order_data.get("profit") is not None
+                    else "  (pending order)"
+                )
+                print(
+                    f"[{ts}] {self.symbol} {label} | "
+                    f"Lots={sig.entry_lot} | "
+                    f"{sig.action.value} @ {sig.entry_price:.5f} | "
+                    f"SL={sig.stop_loss_pips:.1f}  TP={sig.take_profit_pips:.1f}"
+                    f"{profit_str}"
+                )
+
+        def monitor_loop(sig, label):
+            """
+            Block here, printing status every second, until the signal
+            closes or the stop_event fires.  Saves to disk each tick.
+            """
             while not stop_event.is_set():
-                try:
-                    fetch_and_append()
-
-                    # ── hunt for main signal ──────────────────────────────
-                    if active_main_signal is None:
-
-                        signal = self.attempt_signal(target_date=datetime.now(BROKER_TZ))
-
-                        if signal:
-                            active_main_signal = place(signal)
-                            if active_main_signal:
-                                logger.info(f"{self.symbol} main signal placed")
-
-                    # ── monitor main until it closes ──────────────────────
-                    if active_main_signal:
-
-                        monitor_loop(active_main_signal, label="MAIN")
-
-                        if active_main_signal.is_completed:
-
-                            rec = self.attempt_signal(
-                                target_date=datetime.now(BROKER_TZ),
-                                failed_signal=active_main_signal
-                            )
-
-                            active_recovery_signal = place(rec)
-                            
-                            if active_recovery_signal:
-                                logger.info(f"{self.symbol} recovery signal placed")
+                fetch_and_append()
+                sig = mt5_conn.monitor_signal(sig)
+                if label == "RECOVERY" and sig.gain >= sig.entry_lot * sig.stop_loss_pips and sig.sl_adjusted_count == 0:
+                    sig.sl_adjusted_count += 1
+                    mt5_conn.update_order(sig, - sig.entry_lot / 2)
+                save_signal(sig)
+                print_signal_status(sig, label)
+                if sig.is_completed:
+                    ts = datetime.now(BROKER_TZ).strftime("%H:%M:%S")
+                    print(
+                        f"[{ts}] {self.symbol} {label} CLOSED | "
+                        f"outcome={sig.outcome.value.upper()} | "
+                        f"gain=${sig.gain:.2f}"
+                    )
+                    return
+                time.sleep(1)
 
 
-                    # ── monitor recovery until it closes ──────────────────
-                    if active_recovery_signal:
+        # ── MAIN LOOP ─────────────────────────────────────────────────
+        while not stop_event.is_set():
+            try:
+                fetch_and_append()
 
-                        monitor_loop(active_recovery_signal, label="RECOVERY")
+                # ── hunt for main signal ──────────────────────────────
+                if active_main_signal is None:
 
-                        if active_recovery_signal.is_completed:
-                            logger.info(
-                                f"{self.symbol} recovery completed: "
-                                f"{active_recovery_signal.outcome}"
-                            )
+                    signal = self.attempt_signal(target_date=datetime.now(BROKER_TZ))
 
-                    time.sleep(1)
+                    if signal:
+                        active_main_signal = place(signal)
+                        if active_main_signal:
+                            logger.info(f"{self.symbol} main signal placed")
 
-                except Exception:
-                    import traceback
-                    logger.error(f"{self.symbol} worker error:\n{traceback.format_exc()}")
-                    time.sleep(5)
+                # ── monitor main until it closes ──────────────────────
+                if active_main_signal:
 
-            logger.info(f"{self.symbol} worker stopped")
+                    monitor_loop(active_main_signal, label="MAIN")
+
+                    if active_main_signal.is_completed:
+
+                        rec = self.attempt_signal(
+                            target_date=datetime.now(BROKER_TZ),
+                            failed_signal=active_main_signal
+                        )
+
+                        active_recovery_signal = place(rec)
+                        
+                        if active_recovery_signal:
+                            logger.info(f"{self.symbol} recovery signal placed")
+
+
+                # ── monitor recovery until it closes ──────────────────
+                if active_recovery_signal:
+
+                    monitor_loop(active_recovery_signal, label="RECOVERY")
+
+                    if active_recovery_signal.is_completed:
+                        logger.info(
+                            f"{self.symbol} recovery completed: "
+                            f"{active_recovery_signal.outcome}"
+                        )
+
+                time.sleep(1)
+
+            except Exception:
+                import traceback
+                logger.error(f"{self.symbol} worker error:\n{traceback.format_exc()}")
+                time.sleep(5)
+
+        logger.info(f"{self.symbol} worker stopped")
