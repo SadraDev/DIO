@@ -77,17 +77,30 @@ class DataFetcher:
             if rates is None or len(rates) == 0:
                 return []
             
+            # Get point size for spread calculation
+            info = mt5.symbol_info(symbol)
+            point = info.point
+            
             # Convert MT5 rates to Bar objects
             bars = []
             for rate in rates:
+                bid_high = float(rate['high'])
+                bid_low  = float(rate['low'])
+                spread   = float(rate['spread']) * point  # historical spread for this bar
+
                 bar = Bar(
                     timestamp=datetime.fromtimestamp(int(rate['time'])),
                     open_price=float(rate['open']),
-                    high=float(rate['high']),
-                    low=float(rate['low']),
+                    high=bid_high,
+                    low=bid_low,
                     close=float(rate['close']),
                     volume=int(rate['tick_volume']),
                 )
+                bar.bid_high = bid_high
+                bar.ask_high = bid_high + spread
+                bar.bid_low  = bid_low
+                bar.ask_low  = bid_low + spread
+                bar.spread   = spread
                 bars.append(bar)
             
             return bars

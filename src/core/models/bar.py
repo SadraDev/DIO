@@ -34,6 +34,13 @@ class Bar:
         self.low = low
         self.close = close
         self.volume = volume
+
+        self.bid_high = None
+        self.ask_high = None
+        self.bid_low = None
+        self.ask_low = None
+
+        self.spread = None
         
         # Technical attributes
         self._calculate_attributes()

@@ -226,14 +226,13 @@ class TwoHunters():
         scale = 1.0
         if action == SignalAction.SELL:
             # Check for bullish FVG
-            if before_bar.low > signal_bar.close:
-                # fvg_size_pips = self.budget.pips_from_diff(signal_bar.high - signal_bar.low)
-                fvg_size_pips = self.budget.pips_from_diff(extrema - signal_bar.low)
+            if before_bar.bid_low > signal_bar.close:
+                fvg_size_pips = self.budget.pips_from_diff(extrema - signal_bar.bid_low)
                 scale = dynamic_fvg_scale(fvg_size_pips)
                 
-                if scale == 1.0: entry_price = signal_bar.close
-                # else: entry_price = signal_bar.high - abs(signal_bar.low - signal_bar.high) * scale
-                else: entry_price = extrema - abs(signal_bar.low - extrema) * scale
+                if scale == 1.0: entry_price = signal_bar.close  # Default is Bid
+                # else: entry_price = signal_bar.bid_high - abs(signal_bar.bid_low - signal_bar.bid_high) * scale
+                else: entry_price = extrema - abs(signal_bar.bid_low - extrema) * scale
                 
                 self.logger.debug(f"SELL FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f}")
             
@@ -246,13 +245,13 @@ class TwoHunters():
 
         elif action == SignalAction.BUY:
             # Check for bullish FVG
-            if signal_bar.close > before_bar.high:
-                fvg_size_pips = self.budget.pips_from_diff(signal_bar.high - extrema)
+            if signal_bar.close + signal_bar.spread > before_bar.ask_high:
+                fvg_size_pips = self.budget.pips_from_diff(signal_bar.ask_high - extrema)
                 scale = dynamic_fvg_scale(fvg_size_pips)
                 
-                if scale == 1.0: entry_price = signal_bar.close
-                # else: entry_price = signal_bar.low + abs(signal_bar.low - signal_bar.high) * scale
-                else: entry_price = extrema + abs(extrema - signal_bar.high) * scale
+                if scale == 1.0: entry_price = signal_bar.close + signal_bar.spread  # To get Ask close
+                # else: entry_price = signal_bar.ask_low + abs(signal_bar.ask_low - signal_bar.ask_high) * scale
+                else: entry_price = extrema + abs(extrema - signal_bar.ask_high) * scale
                 
                 self.logger.debug(f"BUY FVG: size={fvg_size_pips:.1f} pips, scale={scale:.2f}")
             
@@ -632,7 +631,7 @@ class TwoHunters():
                 # Import ReportGenerator here to avoid circular imports
                 from src.core.reporting.report_generator import ReportGenerator
                 args['dispaly_timeframe'] = 'M1'
-                args['display_range'] = 'daily'
+                args['display_range'] = 'monthly'
                 
                 report_gen = ReportGenerator(report_dir)
                 report_gen.generate_reports(

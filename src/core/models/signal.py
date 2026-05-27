@@ -180,12 +180,12 @@ class Signal:
 
                 for bar in evaluation_bars: 
                     if self.action == SignalAction.SELL:
-                        if bar.high >= self.entry_price:
+                        if bar.bid_high >= self.entry_price:
                             touched_bar = bar
                             break
 
                     if self.action == SignalAction.BUY:
-                        if bar.low <= self.entry_price:
+                        if bar.ask_low <= self.entry_price:
                             touched_bar = bar
                             break
 
@@ -198,8 +198,8 @@ class Signal:
 
                 evaluation_bars = [bar for bar in evaluation_bars if bar.timestamp > touched_bar.timestamp]
 
-            sell_tp_triggered = False
-            buy_tp_triggered = False
+            sell_tp_triggered = True
+            buy_tp_triggered = True
             # SINGLE LOOP: Process bars chronologically  
             for bar in evaluation_bars:
 
@@ -223,7 +223,7 @@ class Signal:
                 # === STEP 2: CHECK FOR TP/SL HITS ===
                 if self.action == SignalAction.SELL:
                     # Take Profit hit (price going down)
-                    if bar.low <= self.take_profit:
+                    if bar.ask_low <= self.take_profit:
                         sell_tp_triggered = True
                         self.exit_price = self.take_profit
                         actual_gain = budget.calculate_gain_loss(
@@ -239,7 +239,7 @@ class Signal:
                                         fetch_attempts=fetch_attempts)
                     
                     # Stop Loss hit (price going up)
-                    if bar.high >= self.stop_loss:
+                    if bar.ask_high >= self.stop_loss:
                         self.exit_price = self.stop_loss
                         actual_loss = budget.calculate_gain_loss(
                             self.symbol, self.entry_price, self.stop_loss,
@@ -254,7 +254,7 @@ class Signal:
                                         fetch_attempts=fetch_attempts)
 
                     # Initial Take Profit hit (price going down)
-                    if bar.low <= self.initial_take_profit and not sell_tp_triggered:
+                    if bar.ask_low <= self.initial_take_profit and not sell_tp_triggered:
                         sell_tp_triggered = True
                         self.entry_lot = self.entry_lot / 2
                         self.exit_price = self.initial_take_profit
@@ -268,7 +268,7 @@ class Signal:
                     
                 elif self.action == SignalAction.BUY:
                     # Take Profit hit (price going up)
-                    if bar.high >= self.take_profit:
+                    if bar.bid_high >= self.take_profit:
                         buy_tp_triggered = True
                         self.exit_price = self.take_profit
                         actual_gain = budget.calculate_gain_loss(
@@ -284,7 +284,7 @@ class Signal:
                                         fetch_attempts=fetch_attempts)
                     
                     # Stop Loss hit (price going down)
-                    if bar.low <= self.stop_loss:
+                    if bar.bid_low <= self.stop_loss:
                         self.exit_price = self.stop_loss
                         actual_loss = budget.calculate_gain_loss(
                             self.symbol, self.entry_price, self.stop_loss,
@@ -299,7 +299,7 @@ class Signal:
                                         fetch_attempts=fetch_attempts)
 
                     # Initial Take Profit hit (price going up)
-                    if bar.high >= self.initial_take_profit and not buy_tp_triggered:
+                    if bar.bid_high >= self.initial_take_profit and not buy_tp_triggered:
                         buy_tp_triggered = True
                         self.entry_lot = self.entry_lot / 2
                         actual_gain = budget.calculate_gain_loss(

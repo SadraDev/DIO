@@ -87,14 +87,14 @@ class BreakoutEngine(BaseIndicator):
             if i + lookahead >= m:
                 break
 
-            current_max = bar.high
-            current_min = bar.low
+            current_max = bar.ask_high
+            current_min = bar.bid_low
 
             is_local_max = all(
-                current_max > _15_bars[j].high for j in range(i + 1, min(i + 1 + lookahead, m))
+                current_max > _15_bars[j].ask_high for j in range(i + 1, min(i + 1 + lookahead, m))
             )
             is_local_min = all(
-                current_min < _15_bars[j].low for j in range(i + 1, min(i + 1 + lookahead, m))
+                current_min < _15_bars[j].bid_low for j in range(i + 1, min(i + 1 + lookahead, m))
             )
 
             if is_local_max and current_max > max_val:
@@ -141,14 +141,14 @@ class BreakoutEngine(BaseIndicator):
             if i + lookahead >= n:
                 break
 
-            current_max = bar.high
-            current_min = bar.low
+            current_max = bar.ask_high
+            current_min = bar.bid_low
 
             is_local_max = all(
-                current_max > session_bars[j].high for j in range(i + 1, min(i + 1 + lookahead, n))
+                current_max > session_bars[j].ask_high for j in range(i + 1, min(i + 1 + lookahead, n))
             )
             is_local_min = all(
-                current_min < session_bars[j].low for j in range(i + 1, min(i + 1 + lookahead, n))
+                current_min < session_bars[j].bid_low for j in range(i + 1, min(i + 1 + lookahead, n))
             )
 
             if is_local_max and current_max > max_val:
@@ -422,7 +422,6 @@ class BreakoutEngine(BaseIndicator):
                 counter += 1
                 continue
 
-            if this_bar != hunter_bar: counter += 1
             if this_bar == hunter_bar:
                 search_idx = idx-1
                 while search_idx >= 0 and (bars[search_idx].is_bullish == cond or bars[search_idx].is_weak):
@@ -437,18 +436,20 @@ class BreakoutEngine(BaseIndicator):
                     return this_bar
 
             # Skip weak bars going backwards until a strong one is found
-            search_idx = idx
-            while search_idx >= 0 and (bars[search_idx].is_bullish == cond or bars[search_idx].is_weak):
-                search_idx -= 1
+            if this_bar != hunter_bar: 
+                counter += 1
+                search_idx = idx
+                while search_idx >= 0 and (bars[search_idx].is_bullish == cond or bars[search_idx].is_weak):
+                    search_idx -= 1
 
-            if search_idx >= 0:
-                to_engulf_bar = bars[search_idx]
-            else:
-                to_engulf_bar = bars[0]
+                if search_idx >= 0:
+                    to_engulf_bar = bars[search_idx]
+                else:
+                    to_engulf_bar = bars[0]
 
-            signal = self._is_order_bar(to_engulf_bar, this_bar, direction)
-            if signal:
-                return signal
+                signal = self._is_order_bar(to_engulf_bar, this_bar, direction)
+                if signal:
+                    return signal
 
         return None
 
@@ -480,9 +481,15 @@ class BreakoutEngine(BaseIndicator):
         if not extrema_bars:
             return hunter_bar.high if action == 'SELL' else hunter_bar.low
 
+        # We SELL at bid and BUY at ask 
         if action == 'SELL':
-            return max(extrema_bars, key=lambda bar: bar.high).high
+            return max(extrema_bars, key=lambda bar: bar.bid_high).bid_high
         elif action == 'BUY':
-            return min(extrema_bars, key=lambda bar: bar.low).low
+            return min(extrema_bars, key=lambda bar: bar.ask_low).ask_low
+
+        # if action == 'SELL':
+        #     return max(extrema_bars, key=lambda bar: bar.ask_high).ask_high
+        # elif action == 'BUY':
+        #     return min(extrema_bars, key=lambda bar: bar.bid_low).bid_low
 
         return 0.0
