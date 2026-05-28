@@ -87,14 +87,14 @@ class BreakoutEngine(BaseIndicator):
             if i + lookahead >= m:
                 break
 
-            current_max = bar.ask_high
-            current_min = bar.bid_low
+            current_max = bar.high
+            current_min = bar.low
 
             is_local_max = all(
-                current_max > _15_bars[j].ask_high for j in range(i + 1, min(i + 1 + lookahead, m))
+                current_max > _15_bars[j].high for j in range(i + 1, min(i + 1 + lookahead, m))
             )
             is_local_min = all(
-                current_min < _15_bars[j].bid_low for j in range(i + 1, min(i + 1 + lookahead, m))
+                current_min < _15_bars[j].low for j in range(i + 1, min(i + 1 + lookahead, m))
             )
 
             if is_local_max and current_max > max_val:
@@ -141,14 +141,14 @@ class BreakoutEngine(BaseIndicator):
             if i + lookahead >= n:
                 break
 
-            current_max = bar.ask_high
-            current_min = bar.bid_low
+            current_max = bar.high
+            current_min = bar.low
 
             is_local_max = all(
-                current_max > session_bars[j].ask_high for j in range(i + 1, min(i + 1 + lookahead, n))
+                current_max > session_bars[j].high for j in range(i + 1, min(i + 1 + lookahead, n))
             )
             is_local_min = all(
-                current_min < session_bars[j].bid_low for j in range(i + 1, min(i + 1 + lookahead, n))
+                current_min < session_bars[j].low for j in range(i + 1, min(i + 1 + lookahead, n))
             )
 
             if is_local_max and current_max > max_val:

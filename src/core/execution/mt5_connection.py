@@ -157,7 +157,7 @@ class MT5Connection:
             request = {
                 "action":    mt5.TRADE_ACTION_DEAL,
                 "symbol":    signal.symbol,
-                "volume":    min(signal.entry_lot, 0.01),
+                "volume":    max(signal.entry_lot, 0.01),
                 "type":      order_type,
                 "price":     price,
                 "sl":        stop_loss,
@@ -259,7 +259,7 @@ class MT5Connection:
             request = {
                 "action": mt5.TRADE_ACTION_PENDING,
                 "symbol": signal.symbol,
-                "volume": min(signal.entry_lot, 0.01),
+                "volume": max(signal.entry_lot, 0.01),
                 "type": order_type,
                 "price": entry_price,
                 "sl": stop_loss,

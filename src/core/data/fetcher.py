@@ -79,8 +79,11 @@ class DataFetcher:
             
             # Get point size for spread calculation
             info = mt5.symbol_info(symbol)
-            point = info.point
-            
+            if info:
+                point = info.point
+            else:
+                point = 0.00001
+
             # Convert MT5 rates to Bar objects
             bars = []
             for rate in rates:

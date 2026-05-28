@@ -198,8 +198,8 @@ class Signal:
 
                 evaluation_bars = [bar for bar in evaluation_bars if bar.timestamp > touched_bar.timestamp]
 
-            sell_tp_triggered = True
-            buy_tp_triggered = True
+            sell_tp_triggered = False
+            buy_tp_triggered = False
             # SINGLE LOOP: Process bars chronologically  
             for bar in evaluation_bars:
 
