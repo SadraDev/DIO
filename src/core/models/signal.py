@@ -139,7 +139,7 @@ class Signal:
                         entry_price=self.entry_price, current_sl=self.stop_loss)
     
     # MAIN EVALUATION METHOD
-    def evaluate_signal(self, budget = None, force_stop_dt: datetime = None, max_fetch_attempts: int = 5) -> Optional['Bar']:
+    def evaluate_signal(self, budget = None, force_stop_dt: datetime = None, max_fetch_attempts: int = 50) -> Optional['Bar']:
         """
         Evaluate signal outcome with SINGLE-LOOP processing and automatic bar fetching
         COMPLETELY REWRITTEN: Uses Budget for all calculations, eliminates double-looping

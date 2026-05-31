@@ -213,15 +213,15 @@ class TwoHunters():
             Returns 0.5 when closer to min_fvg, 0.3 when closer to max_fvg.
             """
             if min_fvg <= fvg_size_pips <= max_fvg:
-                # Linear interpolation from (min_fvg -> 0.6) to (max_fvg -> 0.4)
+                # Linear interpolation from (min_fvg -> 0.8) to (max_fvg -> 0.6)
                 t = (fvg_size_pips - min_fvg) / (max_fvg - min_fvg)  # t ranges 0 to 1
-                return 0.6 - (t * 0.2)
+                return 0.8 - (t * 0.2)
             
             # Handle edge cases
             if fvg_size_pips <= min_fvg:
                 return 1.0  # Below min, return max scale
             if fvg_size_pips >= max_fvg:
-                return 0.4  # Above max, return min scale
+                return 0.6  # Above max, return min scale
 
         scale = 1.0
         if action == SignalAction.SELL:
@@ -293,7 +293,7 @@ class TwoHunters():
             timestamp=timestamp,
             signal_type=signal_type
         )
-        
+
         return signal
     
     def check_strategy_flags(self, signal: Signal) -> bool:
@@ -365,13 +365,13 @@ class TwoHunters():
         entry_price, stop_loss, take_profit, _is_order = self.calculate_entry_details(
             action_enum, signal_bar, extrema
         )
-        
+
         # Create signal
         signal = self.create_signal(
             action_enum, entry_price, stop_loss, take_profit,
             signal_bar.timestamp, SignalType.MAIN if failed_signal is None else SignalType.RECOVERY
         )
-        
+
         if not signal:
             return None
 
