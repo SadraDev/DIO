@@ -154,10 +154,12 @@ class MT5Connection:
                 stop_loss   = signal.stop_loss   if signal.stop_loss   < price else price - 0.00001
                 take_profit = signal.take_profit if signal.take_profit > price else price + 0.00001
 
+            
+
             request = {
                 "action":    mt5.TRADE_ACTION_DEAL,
                 "symbol":    signal.symbol,
-                "volume":    max(signal.entry_lot, 0.01),
+                "volume":    min(signal.entry_lot, 0.05),
                 "type":      order_type,
                 "price":     price,
                 "sl":        stop_loss,
@@ -169,6 +171,7 @@ class MT5Connection:
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
             result = mt5.order_send(request)
+            print(result)
 
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 signal.ticket      = result.order
@@ -259,7 +262,7 @@ class MT5Connection:
             request = {
                 "action": mt5.TRADE_ACTION_PENDING,
                 "symbol": signal.symbol,
-                "volume": max(signal.entry_lot, 0.01),
+                "volume": min(signal.entry_lot, 0.05),
                 "type": order_type,
                 "price": entry_price,
                 "sl": stop_loss,
@@ -272,6 +275,8 @@ class MT5Connection:
             }
 
             result = mt5.order_send(request)
+            print(result)
+
 
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 signal.ticket = result.order

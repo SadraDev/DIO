@@ -346,6 +346,7 @@ class TwoHunters():
             )
         
         else:
+            return None
             self.breakout_engine.type = BreakoutType.CUSTOM
 
             bars_after_failed = [bar for bar in session_bars if bar.timestamp >= failed_signal.outcome_timestamp]
@@ -497,9 +498,9 @@ class TwoHunters():
         # while commission_diff / _r >= 0.3:
         #     commission_diff /= 2
 
-        if self.breakout_engine.type == BreakoutType.CUSTOM:
-            if action == "BUY":  signal.initial_take_profit = signal.entry_price + (abs(signal.entry_price - signal.stop_loss) * 1.0) + commission_diff
-            if action == "SELL": signal.initial_take_profit = signal.entry_price - (abs(signal.entry_price - signal.stop_loss) * 1.0) - commission_diff
+        if self.breakout_engine.type == BreakoutType.DEFAULT:
+            if action == "BUY":  signal.initial_take_profit = signal.entry_price + (abs(signal.entry_price - signal.stop_loss) * 2.0) + commission_diff
+            if action == "SELL": signal.initial_take_profit = signal.entry_price - (abs(signal.entry_price - signal.stop_loss) * 2.0) - commission_diff
 
         # Log signal generation
         log_signal_event(
@@ -631,7 +632,7 @@ class TwoHunters():
                 # Import ReportGenerator here to avoid circular imports
                 from src.core.reporting.report_generator import ReportGenerator
                 args['dispaly_timeframe'] = 'M1'
-                args['display_range'] = 'monthly'
+                args['display_range'] = 'daily'
                 
                 report_gen = ReportGenerator(report_dir)
                 report_gen.generate_reports(
@@ -710,7 +711,7 @@ class TwoHunters():
 
         # ── bootstrap bars ────────────────────────────────────────────
 
-        self.all_bars = fetcher.get_latest_bars(self.symbol, count=800)
+        self.all_bars = fetcher.get_latest_bars(self.symbol, count=1050)
 
         # ── restore today's signals from disk (restart guard) ─────────
 
@@ -728,6 +729,12 @@ class TwoHunters():
 
         # ── small helpers ─────────────────────────────────────────────
 
+        def now():
+            fetch_and_append()
+            if self.all_bars:
+                return self.all_bars[-1].timestamp
+            return None
+
         def fetch_and_append():
             latest = fetcher.get_latest_bars(self.symbol, count=2)
             if latest and len(latest) >= 2:
@@ -739,15 +746,17 @@ class TwoHunters():
         def place(signal):
             """Place a signal unless it is already on disk, return it or None.
             Retries placement for up to 60 seconds on failure."""
+            
             if signal is None:
                 return None
+
             if signal_exists(signal):
                 logger.info(f"{self.symbol} duplicate signal – skipping placement")
                 return signal          # already placed before restart
 
-            deadline = (signal.timestamp + timedelta(seconds=60)).replace(tzinfo=BROKER_TZ)
+            deadline = signal.timestamp + timedelta(minutes=2)
             attempt  = 0
-            while datetime.now(BROKER_TZ) < deadline and not stop_event.is_set():
+            while now() < deadline and not stop_event.is_set():
                 attempt += 1
                 placed = (
                     mt5_conn.place_pending_order(signal)
@@ -760,15 +769,16 @@ class TwoHunters():
                         logger.info(f"{self.symbol} signal placed after {attempt} attempts")
                     return signal
 
-                remaining = max(0, deadline - datetime.now(BROKER_TZ))
+                remaining = (deadline - now()).total_seconds()
                 logger.warning(
                     f"{self.symbol} placement attempt {attempt} failed – "
                     f"retrying ({remaining:.0f}s remaining)"
                 )
-                time.sleep(1)
+                time.sleep(0.1)
+            timeout = (now() - deadline).total_seconds() // 60
 
-            timeout = (datetime.now(BROKER_TZ) - deadline).total_seconds() // 60
-            logger.error(f"{self.symbol} signal placement failed after {attempt} attempts ({timeout:.0f}-min timeout)")
+            if timeout > 0:
+                logger.error(f"{self.symbol} signal placement {timeout:.0f}-min timeout.")
             return None
 
         def print_signal_status(sig, label):

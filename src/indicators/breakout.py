@@ -79,8 +79,9 @@ class BreakoutEngine(BaseIndicator):
         end = session_bars[-1].timestamp
         _15_bars = self.fetcher.fetch_bars_from_mt5(start, end, self.symbol, "M15")
         _15_first_hunt_timestamp = None
-        _15_triggered = False
+        _15_triggered = True
         _fvg_nearby_triggered = False
+        _threshold_time_triggered = True
 
         m = len(_15_bars)
         for i, bar in enumerate(_15_bars):
@@ -156,8 +157,10 @@ class BreakoutEngine(BaseIndicator):
                 max_val = current_max
 
                 if breakout_stage_up >= up_num_hunt:
-                    if bar.timestamp.time() < self._get_threshold_time():
+                    if bar.timestamp.time() < self._get_threshold_time() and not _threshold_time_triggered:
                         up_num_hunt += 1
+                        _threshold_time_triggered = True
+                        continue
 
                     signal_bar = self.find_signal_bar(session_bars, bar, "SELL")
                     if signal_bar:
@@ -187,9 +190,11 @@ class BreakoutEngine(BaseIndicator):
                 min_val = current_min
 
                 if breakout_stage_down >= down_num_hunt:
-                    if bar.timestamp.time() < self._get_threshold_time():
+                    if bar.timestamp.time() < self._get_threshold_time() and not _threshold_time_triggered:
                         down_num_hunt += 1
-                
+                        _threshold_time_triggered = True
+                        continue
+                                        
                     signal_bar = self.find_signal_bar(session_bars, bar, "BUY")
                     if signal_bar:
                         if not _15_triggered and not valid(bar):

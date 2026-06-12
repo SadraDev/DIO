@@ -9,15 +9,15 @@ paths:
   signals: reports/signals
 
 account:
-  balance: 10000
-  default_risk_percent: 0.01
+  balance: 2000
+  default_risk_percent: 0.005
   prop_trading:
     daily_fail_percent: 0.05
     total_fail_percent: 0.08
     win_target_percent: 0.15
 
 trading:
-  commission: 5.0
+  commission: 0.0
   symbols:
   - EURUSD
   - GBPUSD
@@ -63,17 +63,17 @@ strategies:
       num_hunt_recovery: 1
     mbox_time:
       start: '04:30'
-      end: '12:29'
+      end: '12:00'
     sessions:
       main:
-        start: '12:29'
+        start: '12:00'
         end: '22:00'
       london:
-        start: '14:00'
-        end: '22:00'
+        start: '13:30'
+        end: '17:29'
       newyork:
-        start: '20:00'
-        end: '02:29'
+        start: '18:30'
+        end: '00:29'
     choch:
       window: 15
       tolerance: 5

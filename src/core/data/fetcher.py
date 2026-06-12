@@ -181,27 +181,37 @@ class DataFetcher:
             rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
             
             if rates is None or len(rates) == 0:
-                # self.logger.warning(f"No rates returned for {symbol}")
                 return []
+            
+            # Get point size for spread calculation
+            info = mt5.symbol_info(symbol)
+            if info:
+                point = info.point
+            else:
+                point = 0.00001
 
+            # Convert MT5 rates to Bar objects
             bars = []
             for rate in rates:
-                # Convert MT5 timestamp (seconds) to datetime
-                # Matches your existing logic in get_today_signals
-                dt = datetime.fromtimestamp(int(rate['time']))
-                
-                # Create Bar instance
-                # Note: Using tick_volume as it's standard for Forex/CFDs
-                bar = Bar(
-                    timestamp=dt,
-                    open_price=float(rate['open']),
-                    high=float(rate['high']),
-                    low=float(rate['low']),
-                    close=float(rate['close']),
-                    volume=float(rate['tick_volume']) 
-                )
-                bars.append(bar)
+                bid_high = float(rate['high'])
+                bid_low  = float(rate['low'])
+                spread   = float(rate['spread']) * point  # historical spread for this bar
 
+                bar = Bar(
+                    timestamp=datetime.fromtimestamp(int(rate['time'])),
+                    open_price=float(rate['open']),
+                    high=bid_high,
+                    low=bid_low,
+                    close=float(rate['close']),
+                    volume=int(rate['tick_volume']),
+                )
+                bar.bid_high = bid_high
+                bar.ask_high = bid_high + spread
+                bar.bid_low  = bid_low
+                bar.ask_low  = bid_low + spread
+                bar.spread   = spread
+                bars.append(bar)
+            
             return bars
 
         except Exception as e:
